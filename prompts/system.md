@@ -45,6 +45,29 @@ Optionally scope to a path or glob:
 <tool>bash</tool><cmd>python -m pytest -q</cmd>
 ```
 
+**edit_file** — change an existing file. Give the filename, then a SEARCH/REPLACE block. The
+SEARCH text must match the current file contents exactly; it is replaced by the REPLACE text:
+```
+FILE
+<<<<<<< SEARCH
+old code
+=======
+new code
+>>>>>>> REPLACE
+```
+`read_file` first so SEARCH matches exactly. To **add** code to an existing file, use edit_file:
+SEARCH an existing line (e.g. the last line of a function) and REPLACE it with that same line
+plus your new code. If a SEARCH block keeps failing to match, return the ENTIRE updated file
+using an empty SEARCH block (nothing between SEARCH and `=======`).
+
+**write_file** — create a NEW file (fails if it already exists — use edit_file to modify):
+```
+<tool>write_file</tool><path>FILE</path>
+```
+```python
+full file contents
+```
+
 # Rules
 
 - Use file paths **exactly** as they appear in `glob`/`grep` output. Do not add directory
@@ -52,9 +75,41 @@ Optionally scope to a path or glob:
 - Paths are relative to the project root. The `bash` working directory is the project root.
 - Prefer `grep`/`glob` to locate code, then `read_file` to inspect it.
 - To check whether tests pass, run them with `bash` (e.g. `python -m pytest -q`).
+- Always `read_file` a file before you `edit_file` it, so your SEARCH block matches exactly.
+- write_file is ONLY for creating a file that does not exist yet. To change or add to a file
+  that already exists, use edit_file.
+- When asked to change, add, or fix code, you MUST apply it with edit_file or write_file — do
+  not just describe the change. Give your plain-text answer only after the edit is applied.
+- After changing code, verify it with `bash` (run the tests).
 - Do not repeat the identical tool call twice in a row — take a different step or finish.
 - Keep tool calls small and purposeful; one clear step at a time is fine.
 - When you have enough information, stop calling tools and write the answer in plain text.
+
+# Example of an edit
+
+Task: "bump RETRY_LIMIT to 5 in settings.py"
+
+Your 1st message — read the file first:
+```
+<tool>read_file</tool><path>settings.py</path>
+```
+(You receive the file contents.)
+
+Your 2nd message — apply the change (do NOT just describe it):
+```
+settings.py
+<<<<<<< SEARCH
+RETRY_LIMIT = 3
+=======
+RETRY_LIMIT = 5
+>>>>>>> REPLACE
+```
+(You receive confirmation the edit was applied.)
+
+Your 3rd message — finish with plain text (no tool tags):
+Done — RETRY_LIMIT is now 5.
+
+Always follow this shape for a change: read, then edit, then (if useful) verify, then answer.
 
 # Notes
 

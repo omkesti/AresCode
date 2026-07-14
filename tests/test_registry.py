@@ -57,17 +57,18 @@ def test_executor_bash_exit_code(tmp_path):
     assert result.summary == "exit 2"
 
 
-def test_executor_write_is_deferred(tmp_path):
+def test_executor_write_creates_file(tmp_path):
     result = Executor(tmp_path, Config()).run(WriteFileAction("x.py", "print(1)"))
-    assert not result.ok
-    assert result.summary == "deferred"
+    assert result.ok
+    assert result.summary == "created"
+    assert (tmp_path / "x.py").read_text() == "print(1)\n"
 
 
-def test_executor_edit_is_deferred(tmp_path):
+def test_executor_edit_missing_file_is_error(tmp_path):
     action = EditFileAction("x.py", (SearchReplace("a", "b"),))
     result = Executor(tmp_path, Config()).run(action)
     assert not result.ok
-    assert "Phase 3" in result.output
+    assert "not found" in result.output
 
 
 def test_format_observation():

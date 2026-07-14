@@ -9,13 +9,17 @@ See [`docs/context.md`](docs/context.md) for the full architecture and
 
 ## Status
 
-Early development. **Phase 2 (Act) complete:** the agent now uses tools — it reads files,
-searches with grep/glob, and runs shell commands in a single-threaded loop with a lenient
-parser and a live tool-trace UI — on top of Phase 1 (streaming REPL, sessions) and Phase 0
-(package, layered config, CI).
+Early development. **Phase 3 (Edit) complete:** the agent now edits code — SEARCH/REPLACE with
+an exact→whitespace→fuzzy matching cascade, whole-file fallback, a syntax guard, colored diffs,
+and edit telemetry (`/stats`) — on top of Phase 2 (tools + loop), Phase 1 (streaming REPL,
+sessions), and Phase 0 (package, config, CI).
 
-Run `arescode` and ask it to explore your repo or run your tests; `arescode --resume`
-continues your last session. File editing and a permission gate arrive in Phases 3–4.
+Run `arescode` and ask it to fix a test or add a function; `arescode --resume` continues your
+last session.
+
+> **Heads-up:** Phase 3 applies edits directly (showing a diff). The permission gate and
+> approvals arrive in Phase 4 — until then, run it on a repo with a clean git working tree so
+> changes are easy to review and revert.
 
 ## Requirements
 

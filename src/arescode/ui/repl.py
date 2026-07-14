@@ -32,6 +32,7 @@ Commands:
   /clear           reset the conversation history
   /model <name>    switch the active model (no arg shows the current one)
   /verbose         toggle full tool output in the trace
+  /stats           show edit telemetry for this session
   /exit, /quit     leave AresCode
 Input:
   Enter            send the message
@@ -48,6 +49,7 @@ class Command:
     action: Literal["continue", "exit"]
     model: str | None = None  # set when /model switches the active model
     toggle_verbose: bool = False  # set when /verbose is issued
+    show_stats: bool = False  # set when /stats is issued
 
 
 def parse_command(line: str, state: SessionState, console: Console) -> Command:
@@ -67,6 +69,8 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         return Command(action="continue")
     if name == "/verbose":
         return Command(action="continue", toggle_verbose=True)
+    if name == "/stats":
+        return Command(action="continue", show_stats=True)
     if name == "/model":
         if not arg:
             render.note(console, f"current model: {state.model}")
@@ -159,6 +163,8 @@ async def run(*, config: Config, project_dir: Path, resume: bool = False) -> Non
             if command.toggle_verbose:
                 observer.verbose = not observer.verbose
                 render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
+            if command.show_stats:
+                render.note(console, executor.stats.summary())
             continue
 
         task = asyncio.ensure_future(
@@ -184,4 +190,6 @@ async def run(*, config: Config, project_dir: Path, resume: bool = False) -> Non
 
         state.save(project_dir)
 
+    if executor.stats.attempts:
+        render.note(console, executor.stats.summary())
     render.note(console, "bye")

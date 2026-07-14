@@ -86,10 +86,26 @@ class ConsoleObserver:
         mark = "[green]ok[/green]" if result.ok else "[red]![/red]"
         size = len(result.output.splitlines())
         self.console.print(
-            f"  {mark} [dim]{escape(result.summary)} · {size}L · {duration * 1000:.0f}ms[/dim]"
+            f"  {mark} [dim]{escape(result.summary)} | {size}L | {duration * 1000:.0f}ms[/dim]"
         )
-        if self.verbose and result.output:
+        if result.diff:  # edit/write: show the change (green/red), TASKS 3.5
+            self._render_diff(result.diff)
+        elif self.verbose and result.output:
             self.console.print(Text(result.output, style="dim"))
+
+    def _render_diff(self, diff: str) -> None:
+        for line in diff.splitlines():
+            if line.startswith(("+++", "---")):
+                style = "dim"
+            elif line.startswith("+"):
+                style = "green"
+            elif line.startswith("-"):
+                style = "red"
+            elif line.startswith("@@"):
+                style = "cyan"
+            else:
+                style = "dim"
+            self.console.print(Text(line, style=style))
 
     def final(self, text: str) -> None:
         if text.strip():

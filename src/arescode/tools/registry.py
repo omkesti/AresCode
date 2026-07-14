@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from arescode.tools.base import ToolError
+from arescode.tools.edit import EditStats, apply_edit, write_new_file
 from arescode.tools.files import read_file
 from arescode.tools.search import glob_files, grep
 from arescode.tools.shell import run_bash
@@ -109,6 +110,7 @@ class ToolResult:
     ok: bool
     output: str
     summary: str = ""  # short status for the trace line, e.g. "12 matches" / "exit 0"
+    diff: str = ""  # unified diff for edit/write results (rendered by the UI, not sent to model)
 
 
 def truncate_output(text: str, *, max_lines: int = 200, head: int | None = None) -> str:
@@ -143,6 +145,8 @@ class Executor:
     project_dir: Path
     config: Config
     result_max_lines: int = field(default=200)
+    stats: EditStats = field(default_factory=EditStats)
+    _edit_failures: dict[str, int] = field(default_factory=dict)
 
     def is_readonly(self, action: Action) -> bool:
         return isinstance(action, _READONLY)
@@ -168,9 +172,20 @@ class Executor:
             res = run_bash(action.cmd, self.project_dir, timeout=self.config.bash_timeout)
             return ToolResult("bash", res.exit_code == 0, self._clamp(res.output),
                               summary=f"exit {res.exit_code}")
-        if isinstance(action, (WriteFileAction, EditFileAction)):
-            msg = f"{action.tool} is not available yet — the edit path lands in Phase 3."
-            return ToolResult(action.tool, False, msg, summary="deferred")
+        if isinstance(action, EditFileAction):
+            prior = self._edit_failures.get(action.path, 0)
+            res = apply_edit(
+                self.project_dir, action.path, action.edits, self.stats, prior_failures=prior
+            )
+            self._edit_failures[action.path] = 0 if res.ok else prior + 1
+            summary = res.tier or ("ok" if res.ok else "no match")
+            return ToolResult("edit_file", res.ok, res.message, summary=summary, diff=res.diff)
+        if isinstance(action, WriteFileAction):
+            res = write_new_file(self.project_dir, action.path, action.content)
+            return ToolResult(
+                "write_file", res.ok, res.message,
+                summary="created" if res.ok else "refused", diff=res.diff,
+            )
         return ToolResult("unknown", False, f"unknown action: {action!r}", summary="error")
 
     def _clamp(self, text: str) -> str:
