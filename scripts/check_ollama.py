@@ -88,7 +88,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001 - this probe is optional
         pass
 
-    print("OK — all checks passed" if warnings == 0 else f"COMPLETED with {warnings} warning(s)")
+    print("OK - all checks passed" if warnings == 0 else f"COMPLETED with {warnings} warning(s)")
     return 0
 
 

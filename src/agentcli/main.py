@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -37,8 +36,8 @@ def _validate_project_dir(path: Path) -> None:
 
 @app.command()
 def start(
-    model: Optional[str] = typer.Option(None, "--model", help="Override the model name."),
-    ctx: Optional[int] = typer.Option(
+    model: str | None = typer.Option(None, "--model", help="Override the model name."),
+    ctx: int | None = typer.Option(
         None, "--ctx", help="Override the context window size (num_ctx)."
     ),
 ) -> None:
@@ -48,10 +47,10 @@ def start(
 
     config = load_config(project_dir=project_dir, overrides={"model": model, "num_ctx": ctx})
 
-    typer.echo(f"agentcli · model={config.model} · num_ctx={config.num_ctx}")
+    typer.echo(f"agentcli | model={config.model} | num_ctx={config.num_ctx}")
     typer.echo(f"project: {project_dir}")
     # Phase 1 replaces the line below with the interactive REPL (ui/repl.py).
-    typer.echo("(Phase 0 scaffolding — the interactive REPL arrives in Phase 1. Exiting cleanly.)")
+    typer.echo("(Phase 0 scaffolding - the interactive REPL arrives in Phase 1. Exiting cleanly.)")
 
 
 def main() -> None:
