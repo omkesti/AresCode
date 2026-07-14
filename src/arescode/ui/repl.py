@@ -1,8 +1,9 @@
-"""Interactive REPL: prompt_toolkit input, slash commands, streaming responses.
+"""Interactive REPL: prompt_toolkit input, slash commands, and the agent loop.
 
-Enter sends; Ctrl+J (or Alt+Enter where the terminal allows it) inserts a newline.
-Persistent history, Ctrl+C cancels the current generation without killing the session,
-Ctrl+D exits (context.md §3, TASKS 1.3 / 1.6).
+Enter sends; Ctrl+J (or Alt+Enter where the terminal allows it) inserts a newline. Each message
+runs the agent loop (the model can read files, search, and run commands), rendered as a tool
+trace. Ctrl+C cancels the current turn without killing the session; Ctrl+D exits
+(context.md §3, TASKS 1.3 / 1.6 / 2.8).
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from arescode.config import Config
+from arescode.core.context import load_system_prompt
+from arescode.core.loop import run_turn
 from arescode.core.state import SessionState
-from arescode.providers.base import ProviderError
 from arescode.providers.openai_compat import OpenAICompatProvider
+from arescode.tools.registry import Executor
 from arescode.ui import render
 
 HELP_TEXT = """\
@@ -28,11 +31,12 @@ Commands:
   /help            show this help
   /clear           reset the conversation history
   /model <name>    switch the active model (no arg shows the current one)
+  /verbose         toggle full tool output in the trace
   /exit, /quit     leave AresCode
 Input:
   Enter            send the message
   Ctrl+J           insert a newline (also Alt+Enter where the terminal allows it)
-  Ctrl+C           cancel the current response
+  Ctrl+C           cancel the current turn
   Ctrl+D           exit
 """
 
@@ -43,6 +47,7 @@ class Command:
 
     action: Literal["continue", "exit"]
     model: str | None = None  # set when /model switches the active model
+    toggle_verbose: bool = False  # set when /verbose is issued
 
 
 def parse_command(line: str, state: SessionState, console: Console) -> Command:
@@ -60,6 +65,8 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         state.clear()
         render.note(console, "history cleared")
         return Command(action="continue")
+    if name == "/verbose":
+        return Command(action="continue", toggle_verbose=True)
     if name == "/model":
         if not arg:
             render.note(console, f"current model: {state.model}")
@@ -114,9 +121,12 @@ def _load_session(
 
 
 async def run(*, config: Config, project_dir: Path, resume: bool = False) -> None:
-    """Run the interactive chat loop until the user exits."""
+    """Run the interactive agent loop until the user exits."""
     console = Console()
     provider = OpenAICompatProvider.from_config(config)
+    executor = Executor(project_dir, config)
+    observer = render.ConsoleObserver(console, verbose=False)
+    system_prompt = load_system_prompt()
     state = _load_session(project_dir, config, console, resume=resume)
 
     render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
@@ -146,27 +156,32 @@ async def run(*, config: Config, project_dir: Path, resume: bool = False) -> Non
             if command.model:
                 config = config.model_copy(update={"model": command.model})
                 provider = OpenAICompatProvider.from_config(config)
+            if command.toggle_verbose:
+                observer.verbose = not observer.verbose
+                render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
             continue
 
-        state.user(user_input)
         task = asyncio.ensure_future(
-            render.stream_response(provider, state.to_wire(), console=console)
+            run_turn(
+                user_input,
+                state=state,
+                provider=provider,
+                executor=executor,
+                system_prompt=system_prompt,
+                observer=observer,
+                max_steps=config.max_steps,
+            )
         )
         try:
-            reply = await task
-        except KeyboardInterrupt:  # Ctrl+C mid-generation: cancel, keep the session
+            await task
+        except KeyboardInterrupt:  # Ctrl+C mid-turn: cancel, keep the session
             task.cancel()
             try:
                 await task
             except (asyncio.CancelledError, KeyboardInterrupt):
                 pass
             render.note(console, "cancelled")
-            continue
-        except ProviderError as exc:
-            render.error(console, str(exc))
-            continue
 
-        state.assistant(reply)
         state.save(project_dir)
 
     render.note(console, "bye")

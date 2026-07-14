@@ -4,9 +4,9 @@ Every command needed to set up, run, test, and verify the project, in the order 
 normally use them. Commands are given for **Windows PowerShell** (primary) with a
 **macOS/Linux (bash)** equivalent underneath where they differ.
 
-> Current stage: **Phase 1 (Talk)**. `arescode` starts an interactive REPL: chat with the
-> local model with live streaming, slash commands, and session save/resume. Tool use and
-> file editing arrive in Phases 2-3.
+> Current stage: **Phase 2 (Act)**. `arescode` runs an agent loop: it reads files, searches
+> (grep/glob), and runs shell commands to answer questions about your project, shown as a live
+> tool trace. File editing and a permission gate arrive in Phases 3-4.
 > See [`TASKS.md`](TASKS.md) for the roadmap and [`context.md`](context.md) for architecture.
 
 ---
@@ -131,6 +131,7 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 | `/help` | list commands |
 | `/clear` | reset the conversation history |
 | `/model <name>` | switch the active model |
+| `/verbose` | toggle full tool output in the trace |
 | `/exit`, `/quit` | leave (or press **Ctrl+D**) |
 
 **Ctrl+C** cancels the current response without ending the session. Sessions autosave to

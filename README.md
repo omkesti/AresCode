@@ -9,12 +9,13 @@ See [`docs/context.md`](docs/context.md) for the full architecture and
 
 ## Status
 
-Early development. **Phase 1 (Talk) complete:** streaming provider over Ollama's
-OpenAI-compatible endpoint, an interactive REPL (multiline input, slash commands,
-live markdown rendering), and session save/resume — on top of the Phase 0 foundation
-(installable package, layered config, test harness, CI).
+Early development. **Phase 2 (Act) complete:** the agent now uses tools — it reads files,
+searches with grep/glob, and runs shell commands in a single-threaded loop with a lenient
+parser and a live tool-trace UI — on top of Phase 1 (streaming REPL, sessions) and Phase 0
+(package, layered config, CI).
 
-Run `arescode` and start chatting; `arescode --resume` continues your last session.
+Run `arescode` and ask it to explore your repo or run your tests; `arescode --resume`
+continues your last session. File editing and a permission gate arrive in Phases 3–4.
 
 ## Requirements
 

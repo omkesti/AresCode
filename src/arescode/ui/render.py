@@ -1,21 +1,26 @@
-"""Terminal rendering with rich: live token streaming then a final markdown re-render.
+"""Terminal rendering with rich: chat streaming, the final answer, and the tool-trace UI.
 
-Shows a spinner until the first token, streams raw text live for responsiveness, then
-replaces it with syntax-highlighted markdown (context.md §3, TASKS 1.4).
+``stream_response`` (Phase 1) streams plain chat. ``ConsoleObserver`` (Phase 2) renders the
+agent loop: a spinner while the model thinks, a compact colored line per tool call (tool, args,
+duration, result size), and the final answer as markdown. ``/verbose`` shows full tool output
+(context.md §3, TASKS 1.4 / 2.8).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from typing import Any
 
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.spinner import Spinner
 from rich.text import Text
 
 from arescode.providers.base import ModelProvider, WireMessage
+from arescode.tools.registry import Action, ToolResult, action_summary
 
 
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
@@ -56,3 +61,42 @@ async def stream_response(
     if text.strip():
         console.print(Markdown(text))
     return text
+
+
+class ConsoleObserver:
+    """LoopObserver implementation that renders the agent loop to a rich console."""
+
+    def __init__(self, console: Console, *, verbose: bool = False) -> None:
+        self.console = console
+        self.verbose = verbose
+
+    def thinking(self) -> AbstractContextManager:
+        return self.console.status("[dim]thinking...[/dim]", spinner="dots")
+
+    def assistant_text(self, text: str) -> None:
+        # The model's between-step reasoning; shown dimmed so tool traces stand out.
+        self.console.print(Text(text.strip(), style="dim italic"))
+
+    def tool_start(self, action: Action) -> None:
+        self.console.print(
+            f"[cyan]>[/cyan] [bold]{action.tool}[/bold] [dim]{escape(action_summary(action))}[/dim]"
+        )
+
+    def tool_end(self, action: Action, result: ToolResult, duration: float) -> None:
+        mark = "[green]ok[/green]" if result.ok else "[red]![/red]"
+        size = len(result.output.splitlines())
+        self.console.print(
+            f"  {mark} [dim]{escape(result.summary)} · {size}L · {duration * 1000:.0f}ms[/dim]"
+        )
+        if self.verbose and result.output:
+            self.console.print(Text(result.output, style="dim"))
+
+    def final(self, text: str) -> None:
+        if text.strip():
+            self.console.print(Markdown(text))
+
+    def notice(self, text: str) -> None:
+        note(self.console, text)
+
+    def error(self, text: str) -> None:
+        error(self.console, text)

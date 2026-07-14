@@ -56,3 +56,10 @@ def test_enter_submits_and_newline_keys_are_bound():
     assert bindings[(Keys.ControlM,)] == "_submit"  # Enter -> send
     assert bindings[(Keys.ControlJ,)] == "_newline"  # Ctrl+J -> newline
     assert bindings[(Keys.Escape, Keys.ControlM)] == "_newline"  # Alt+Enter -> newline
+
+
+def test_verbose_command_toggles():
+    state = SessionState.new("m")
+    command = parse_command("/verbose", state, _console())
+    assert command.action == "continue"
+    assert command.toggle_verbose is True
