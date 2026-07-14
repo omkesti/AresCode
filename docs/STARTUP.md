@@ -1,10 +1,10 @@
-# STARTUP.md — Running `agentcli`
+# STARTUP.md — Running AresCode
 
 Every command needed to set up, run, test, and verify the project, in the order you'd
 normally use them. Commands are given for **Windows PowerShell** (primary) with a
 **macOS/Linux (bash)** equivalent underneath where they differ.
 
-> Current stage: **Phase 1 (Talk)**. `agentcli` starts an interactive REPL: chat with the
+> Current stage: **Phase 1 (Talk)**. `arescode` starts an interactive REPL: chat with the
 > local model with live streaming, slash commands, and session save/resume. Tool use and
 > file editing arrive in Phases 2-3.
 > See [`TASKS.md`](TASKS.md) for the roadmap and [`context.md`](context.md) for architecture.
@@ -75,7 +75,7 @@ pip install -e ".[dev]"
 
 This installs runtime deps (`httpx`, `prompt_toolkit`, `rich`, `typer`, `pydantic`,
 `pathspec`) plus dev tools (`pytest`, `pytest-asyncio`, `ruff`) and wires up the
-`agentcli` console command.
+`arescode` console command.
 
 > **Not activating the venv?** Prefix every command with the venv's interpreter instead:
 > `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"` (PowerShell) or
@@ -107,24 +107,24 @@ Expected: `PASS` lines for the model and completion, ending in `OK — all check
 With the venv active:
 
 ```powershell
-agentcli
+arescode
 ```
 
 Equivalent (no activation needed):
 
 ```powershell
-python -m agentcli
+python -m arescode
 ```
 
 Flag overrides and resume:
 
 ```powershell
-agentcli --model qwen2.5-coder:7b --ctx 16384   # override model / context window
-agentcli --resume                               # continue the most recent session
+arescode --model qwen2.5-coder:7b --ctx 16384   # override model / context window
+arescode --resume                               # continue the most recent session
 ```
 
-This opens the interactive REPL. Type a message and press **Alt+Enter** to send
-(Enter inserts a newline). In-REPL commands:
+This opens the interactive REPL. Type a message and press **Enter** to send
+(**Ctrl+J** inserts a newline). In-REPL commands:
 
 | Command | Effect |
 |---|---|
@@ -134,7 +134,7 @@ This opens the interactive REPL. Type a message and press **Alt+Enter** to send
 | `/exit`, `/quit` | leave (or press **Ctrl+D**) |
 
 **Ctrl+C** cancels the current response without ending the session. Sessions autosave to
-`.agentcli/sessions/<timestamp>.json` after each reply.
+`.arescode/sessions/<timestamp>.json` after each reply.
 
 > First reply after a cold start is slow (~10 s) while the 7B model loads into VRAM;
 > subsequent replies are near-instant because `keep_alive` keeps it warm.
@@ -176,12 +176,12 @@ ruff format .                      # format (optional)
 
 Settings are layered, lowest → highest precedence:
 
-1. Built-in defaults (in `src/agentcli/config.py`)
-2. `~/.agentcli/config.toml` — global, all projects
-3. `./.agentcli.toml` — per project (repo root)
+1. Built-in defaults (in `src/arescode/config.py`)
+2. `~/.arescode/config.toml` — global, all projects
+3. `./.arescode.toml` — per project (repo root)
 4. CLI flags (`--model`, `--ctx`)
 
-Example `./.agentcli.toml`:
+Example `./.arescode.toml`:
 
 ```toml
 model = "qwen2.5-coder:7b"
@@ -208,7 +208,7 @@ python -m venv .venv
 pip install -e ".[dev]"
 ruff check .
 pytest
-python -m agentcli
+python -m arescode
 python scripts/check_ollama.py
 ```
 
@@ -220,7 +220,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ruff check .
 pytest
-python -m agentcli
+python -m arescode
 python scripts/check_ollama.py
 ```
 

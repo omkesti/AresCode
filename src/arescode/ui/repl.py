@@ -17,18 +17,18 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
-from agentcli.config import Config
-from agentcli.core.state import SessionState
-from agentcli.providers.base import ProviderError
-from agentcli.providers.openai_compat import OpenAICompatProvider
-from agentcli.ui import render
+from arescode.config import Config
+from arescode.core.state import SessionState
+from arescode.providers.base import ProviderError
+from arescode.providers.openai_compat import OpenAICompatProvider
+from arescode.ui import render
 
 HELP_TEXT = """\
 Commands:
   /help            show this help
   /clear           reset the conversation history
   /model <name>    switch the active model (no arg shows the current one)
-  /exit, /quit     leave agentcli
+  /exit, /quit     leave AresCode
 Input:
   Enter            send the message
   Ctrl+J           insert a newline (also Alt+Enter where the terminal allows it)
@@ -95,7 +95,7 @@ def _build_key_bindings() -> KeyBindings:
 
 
 def _history_path() -> Path:
-    directory = Path.home() / ".agentcli"
+    directory = Path.home() / ".arescode"
     directory.mkdir(parents=True, exist_ok=True)
     return directory / "history"
 

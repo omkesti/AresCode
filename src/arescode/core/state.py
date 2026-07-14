@@ -1,6 +1,6 @@
 """Session state: the flat message history plus JSON save/resume.
 
-Roles: system / user / assistant / tool. Autosave to ``.agentcli/sessions/<id>.json``;
+Roles: system / user / assistant / tool. Autosave to ``.arescode/sessions/<id>.json``;
 ``load_latest`` powers ``--resume`` (context.md §4.1, TASKS 1.5).
 """
 
@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-SESSIONS_SUBDIR = Path(".agentcli") / "sessions"
+SESSIONS_SUBDIR = Path(".arescode") / "sessions"
 VALID_ROLES = frozenset({"system", "user", "assistant", "tool"})
 
 

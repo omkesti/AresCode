@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from agentcli.providers.base import Chunk, ModelProvider, ProviderError, WireMessage
+from arescode.providers.base import Chunk, ModelProvider, ProviderError, WireMessage
 
 if TYPE_CHECKING:
-    from agentcli.config import Config
+    from arescode.config import Config
 
 
 class OpenAICompatProvider(ModelProvider):

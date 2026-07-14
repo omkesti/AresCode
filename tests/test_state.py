@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentcli.core.state import Message, SessionState
+from arescode.core.state import Message, SessionState
 
 
 def test_message_roundtrip():
@@ -51,7 +51,7 @@ def test_save_and_load_roundtrip(tmp_path):
     path = state.save(tmp_path)
 
     assert path.exists()
-    assert path.parent == tmp_path / ".agentcli" / "sessions"
+    assert path.parent == tmp_path / ".arescode" / "sessions"
 
     loaded = SessionState.load(path)
     assert loaded.model == state.model

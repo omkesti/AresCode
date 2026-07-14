@@ -1,4 +1,4 @@
-"""agentcli CLI entry point: parse flags, load layered config, launch the REPL.
+"""arescode CLI entry point: parse flags, load layered config, launch the REPL.
 
 Validates the working directory, resolves configuration, then hands off to the interactive
 chat loop in ``ui/repl.py`` (TASKS 1.3-1.6).
@@ -12,9 +12,12 @@ from pathlib import Path
 
 import typer
 
-from agentcli.config import load_config
+from arescode.config import load_config
 
-app = typer.Typer(add_completion=False, help="A local-model coding agent (Ollama-powered).")
+app = typer.Typer(
+    add_completion=False,
+    help="AresCode - a local-model coding agent (Ollama-powered).",
+)
 
 
 def _validate_project_dir(path: Path) -> None:
@@ -49,13 +52,13 @@ def start(
     config = load_config(project_dir=project_dir, overrides={"model": model, "num_ctx": ctx})
 
     # Imported lazily so `--help` and startup stay fast and don't pull in the UI stack.
-    from agentcli.ui.repl import run
+    from arescode.ui.repl import run
 
     asyncio.run(run(config=config, project_dir=project_dir, resume=resume))
 
 
 def main() -> None:
-    """Console-script and ``python -m agentcli`` entry point."""
+    """Console-script and ``python -m arescode`` entry point."""
     app()
 
 

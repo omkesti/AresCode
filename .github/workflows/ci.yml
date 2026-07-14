@@ -28,4 +28,4 @@ jobs:
         run: pytest
 
       - name: CLI smoke — loads config, prints model + context size, exits cleanly
-        run: python -m agentcli
+        run: python -m arescode

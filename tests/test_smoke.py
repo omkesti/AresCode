@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentcli import __version__
-from agentcli.config import Config, load_config
+from arescode import __version__
+from arescode.config import Config, load_config
 
 
 def test_version_is_a_string():
@@ -35,14 +35,14 @@ def test_load_config_falls_back_to_defaults(tmp_path):
 
 def test_project_toml_overrides_global(tmp_path):
     (tmp_path / "global.toml").write_text('model = "from-global"\nnum_ctx = 2048\n')
-    (tmp_path / ".agentcli.toml").write_text('model = "from-project"\n')
+    (tmp_path / ".arescode.toml").write_text('model = "from-project"\n')
     cfg = load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
     assert cfg.model == "from-project"  # project layer wins over global
     assert cfg.num_ctx == 2048          # global value survives where project is silent
 
 
 def test_cli_overrides_beat_files(tmp_path):
-    (tmp_path / ".agentcli.toml").write_text('model = "from-project"\nnum_ctx = 2048\n')
+    (tmp_path / ".arescode.toml").write_text('model = "from-project"\nnum_ctx = 2048\n')
     cfg = load_config(
         project_dir=tmp_path,
         global_config_path=tmp_path / "global.toml",
@@ -53,7 +53,7 @@ def test_cli_overrides_beat_files(tmp_path):
 
 
 def test_none_overrides_are_ignored(tmp_path):
-    (tmp_path / ".agentcli.toml").write_text('model = "from-project"\n')
+    (tmp_path / ".arescode.toml").write_text('model = "from-project"\n')
     cfg = load_config(
         project_dir=tmp_path,
         global_config_path=tmp_path / "global.toml",
@@ -63,6 +63,6 @@ def test_none_overrides_are_ignored(tmp_path):
 
 
 def test_unknown_config_key_is_rejected(tmp_path):
-    (tmp_path / ".agentcli.toml").write_text("bogus_key = 1\n")
+    (tmp_path / ".arescode.toml").write_text("bogus_key = 1\n")
     with pytest.raises(ValidationError):
         load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")

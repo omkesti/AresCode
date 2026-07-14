@@ -15,11 +15,11 @@ from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.text import Text
 
-from agentcli.providers.base import ModelProvider, WireMessage
+from arescode.providers.base import ModelProvider, WireMessage
 
 
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
-    console.print(f"[bold]agentcli[/bold]  model=[cyan]{model}[/cyan]  num_ctx={num_ctx}")
+    console.print(f"[bold]AresCode[/bold]  model=[cyan]{model}[/cyan]  num_ctx={num_ctx}")
     console.print(f"[dim]project: {project_dir}[/dim]")
     console.print(
         "[dim]Enter to send - Ctrl+J for a newline - /help for commands - Ctrl+D to quit[/dim]"

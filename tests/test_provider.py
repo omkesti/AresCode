@@ -10,8 +10,8 @@ import json
 import httpx
 import pytest
 
-from agentcli.providers.base import ProviderError
-from agentcli.providers.openai_compat import OpenAICompatProvider
+from arescode.providers.base import ProviderError
+from arescode.providers.openai_compat import OpenAICompatProvider
 
 SSE_TWO_DELTAS = (
     'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'

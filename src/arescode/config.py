@@ -3,8 +3,8 @@
 Precedence, lowest to highest (TASKS 0.3, context.md §4.7):
 
     built-in defaults
-      -> ~/.agentcli/config.toml   (global)
-      -> ./.agentcli.toml          (per project)
+      -> ~/.arescode/config.toml   (global)
+      -> ./.arescode.toml          (per project)
       -> CLI flag overrides
 
 ``load_config`` merges these layers and validates the result. Unknown keys are
@@ -20,8 +20,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-GLOBAL_CONFIG_PATH = Path.home() / ".agentcli" / "config.toml"
-PROJECT_CONFIG_NAME = ".agentcli.toml"
+GLOBAL_CONFIG_PATH = Path.home() / ".arescode" / "config.toml"
+PROJECT_CONFIG_NAME = ".arescode.toml"
 
 
 class Config(BaseModel):
@@ -63,7 +63,7 @@ def load_config(
     """Build a :class:`Config` by merging every configuration layer.
 
     Args:
-        project_dir: Directory to look for ``.agentcli.toml`` in (defaults to cwd).
+        project_dir: Directory to look for ``.arescode.toml`` in (defaults to cwd).
         overrides: CLI-flag values; keys whose value is ``None`` are ignored so an
             unset flag never clobbers a file/default value.
         global_config_path: Location of the global config (overridable for tests).

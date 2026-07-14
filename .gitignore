@@ -16,8 +16,8 @@ env/
 .ruff_cache/
 .mypy_cache/
 
-# agentcli runtime state (autosaved sessions, logs)
-.agentcli/
+# arescode runtime state (autosaved sessions, logs)
+.arescode/
 
 # Secrets / local env
 .env

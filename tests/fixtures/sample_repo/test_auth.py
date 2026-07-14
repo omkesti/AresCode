@@ -1,4 +1,4 @@
-"""Tests for the fixture repo's auth module (run by the agent, not by agentcli's CI)."""
+"""Tests for the fixture repo's auth module (run by the agent, not by arescode's CI)."""
 
 from auth import login
 

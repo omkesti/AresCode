@@ -1,4 +1,4 @@
-"""Verify a local Ollama server for agentcli (TASKS 0.6).
+"""Verify a local Ollama server for AresCode (TASKS 0.6).
 
 Checks, in order:
   1. the OpenAI-compatible endpoint responds and lists the target model;
@@ -26,7 +26,7 @@ DEFAULT_CTX = 16384
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify local Ollama for agentcli.")
+    parser = argparse.ArgumentParser(description="Verify local Ollama for AresCode.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--ctx", type=int, default=DEFAULT_CTX)

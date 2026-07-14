@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentcli"
+name = "arescode"
 version = "0.0.1"
 description = "A Claude Code-style terminal coding agent powered by local models via Ollama."
 readme = "README.md"
@@ -28,10 +28,10 @@ dev = [
 ]
 
 [project.scripts]
-agentcli = "agentcli.main:main"
+arescode = "arescode.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentcli"]
+packages = ["src/arescode"]
 
 [tool.ruff]
 line-length = 100

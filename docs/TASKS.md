@@ -1,6 +1,6 @@
 # TASKS.md — Implementation Plan
 
-> Phased task list for `agent-cli`. Completing every task below yields the fully working MVP defined in `context.md` §1.
+> Phased task list for `AresCode`. Completing every task below yields the fully working MVP defined in `context.md` §1.
 > Each phase ends with an **exit criteria** checkpoint — do not start the next phase until it passes on a real repo.
 >
 > Legend: `[HAND]` = write manually without AI assistance (per decision D10). Everything else is fair game for Claude Code, but review every generated line against `context.md` decisions D1–D10.
@@ -11,12 +11,12 @@
 
 - [ ] 0.1 Initialize repo: `pyproject.toml` (Python 3.11+, src layout), ruff + pytest config, `.gitignore`
 - [ ] 0.2 Create the package skeleton exactly as in `context.md` §6 (empty modules with docstrings stating each module's single responsibility)
-- [ ] 0.3 Implement `config.py`: pydantic settings model; load order = defaults → `~/.agentcli/config.toml` → `./.agentcli.toml` → CLI flags. Fields: model name, base_url, num_ctx (default 16384), temperature (default 0.1), max_steps (default 25), timeouts
-- [ ] 0.4 Implement `main.py` typer entry: `agentcli` launches REPL in cwd; `--model`, `--ctx` flag overrides; validate cwd is a directory the user owns
+- [ ] 0.3 Implement `config.py`: pydantic settings model; load order = defaults → `~/.arescode/config.toml` → `./.arescode.toml` → CLI flags. Fields: model name, base_url, num_ctx (default 16384), temperature (default 0.1), max_steps (default 25), timeouts
+- [ ] 0.4 Implement `main.py` typer entry: `arescode` launches REPL in cwd; `--model`, `--ctx` flag overrides; validate cwd is a directory the user owns
 - [ ] 0.5 Set up `tests/` with pytest, one smoke test, and a `fixtures/` sample mini-repo
 - [ ] 0.6 Verify Ollama locally: `qwen2.5-coder:7b` pulled, OpenAI-compat endpoint responding, confirm num_ctx override works (log a warning if server ignores it)
 
-**Exit criteria:** `pipx run` / `python -m agentcli` starts, loads config, prints model + context size, exits cleanly. Tests green in CI (GitHub Actions, lint + pytest).
+**Exit criteria:** `pipx run` / `python -m arescode` starts, loads config, prints model + context size, exits cleanly. Tests green in CI (GitHub Actions, lint + pytest).
 
 ---
 
@@ -26,7 +26,7 @@
 - [ ] 1.2 Implement `providers/openai_compat.py` with httpx: SSE streaming against Ollama's `/v1/chat/completions`; pass num_ctx/temperature/keep_alive via extra options; connection-error and timeout handling with clear user-facing messages
 - [ ] 1.3 Build minimal REPL in `ui/repl.py` (prompt_toolkit): multiline input (Alt+Enter submits), input history file, Ctrl+C cancels current generation without killing the session, Ctrl+D exits
 - [ ] 1.4 Build `ui/render.py` (rich): stream tokens live, then re-render final message as formatted markdown with syntax-highlighted code blocks; spinner while waiting for first token
-- [ ] 1.5 Implement `core/state.py`: flat message history (system/user/assistant/tool roles), session autosave to `.agentcli/sessions/<timestamp>.json`, `--resume` flag loads the latest
+- [ ] 1.5 Implement `core/state.py`: flat message history (system/user/assistant/tool roles), session autosave to `.arescode/sessions/<timestamp>.json`, `--resume` flag loads the latest
 - [ ] 1.6 Slash commands v1: `/exit`, `/clear` (reset history), `/model <name>`, `/help`
 
 **Exit criteria:** hold a fluid multi-turn conversation with qwen2.5-coder:7b in the terminal; kill and resume a session; streaming feels instant on the 3050.
@@ -66,7 +66,7 @@
 
 - [ ] 4.1 Implement `permissions/gate.py` verdict engine: auto-allow read-only; ask for edit/write with diff preview `[y/n/a(lways for file)]`; ask for bash with `[y/n/a(lways for command)]` keyed on first token
 - [ ] 4.2 Hard-deny layer (model-unoverridable): realpath containment check against project root (catches `../` and symlinks); command regex blocklist per `context.md` §4.6; denials are logged and reported to the model as tool errors
-- [ ] 4.3 Session allowlist (in-memory, resets on exit) + persistent allowlist in `.agentcli.toml`; `/allow` and `/deny` slash commands to inspect/edit
+- [ ] 4.3 Session allowlist (in-memory, resets on exit) + persistent allowlist in `.arescode.toml`; `/allow` and `/deny` slash commands to inspect/edit
 - [ ] 4.4 Ensure gate reads ONLY parsed action fields, never model prose (prompt-injection containment); add a test with a fixture file containing hostile instructions and assert gate behavior is unchanged
 - [ ] 4.5 `--yolo` flag for auto-approve mode (explicitly opt-in, prints a warning banner)
 - [ ] 4.6 `tests/test_gate.py`: path escapes, symlink escape, blocklist hits, allowlist scoping
@@ -78,7 +78,7 @@
 ## Phase 5 — Endure (context management + memory) — milestone M5
 
 - [ ] 5.1 Implement `repo/repomap.py`: gitignore-filtered file tree with sizes, capped ~1,500 tokens (breadth-first truncation for huge repos), injected into system prompt at session start; `/map` command to view
-- [ ] 5.2 Implement AGENT.md support: load from project root into system prompt if present; `agentcli init` generates a starter template (project conventions, key commands)
+- [ ] 5.2 Implement ARES.md support: load from project root into system prompt if present; `arescode init` generates a starter template (project conventions, key commands)
 - [ ] 5.3 Implement token accounting in `core/context.py`: `len//4` estimate per message, running total, budget = num_ctx minus reply reserve (~1,500 tokens)
 - [ ] 5.4 Implement compaction: at 75% budget, summarize oldest turns into one assistant message via a dedicated summarization call; never compact system prompt, current task statement, or last 4 tool results; `/compact` forces it manually; show a subtle indicator when it fires
 - [ ] 5.5 Long-run hardening: verify a 30+ step session on the 3050 stays coherent and within VRAM; tune default num_ctx if KV cache spills
@@ -92,11 +92,11 @@
 - [ ] 6.1 Complete slash commands: `/stats`, `/compact`, `/map`, `/allow`, `/deny`, `/verbose`, `/resume <id>`, `/sessions`
 - [ ] 6.2 First-run experience: detect missing Ollama/model and print exact fix commands; graceful message when ripgrep absent
 - [ ] 6.3 Error-path sweep: model server down mid-turn, malformed config, unreadable files, git-less directories — all produce clear messages, never tracebacks
-- [ ] 6.4 Packaging: installable via `pipx install .`, console script `agentcli`; version command; README with 5-minute quickstart (per docs principle: <5 min to first success)
-- [ ] 6.5 Dogfood gauntlet: use agent-cli itself (not Claude Code) for 3 real tasks on one of your other projects (e.g., a JARVIS or Suture fix); log every failure into `LATER.md` or the parser corpus
+- [ ] 6.4 Packaging: installable via `pipx install .`, console script `arescode`; version command; README with 5-minute quickstart (per docs principle: <5 min to first success)
+- [ ] 6.5 Dogfood gauntlet: use AresCode itself (not Claude Code) for 3 real tasks on one of your other projects (e.g., a JARVIS or Suture fix); log every failure into `LATER.md` or the parser corpus
 - [ ] 6.6 Write `LATER.md`: deferred features backlog (sub-agents, MCP, TODO planner, tree-sitter symbols, steering queue, multi-model routing) so scope creep has a home that isn't the codebase
 
-**Exit criteria — MVP Definition of Done (from context.md §7):** in a real repo, `agentcli` takes "fix the failing test in X", finds the file, edits it, reruns tests, and reports success — every write/command approved through the gate — using only the local model.
+**Exit criteria — MVP Definition of Done (from context.md §7):** in a real repo, `arescode` takes "fix the failing test in X", finds the file, edits it, reruns tests, and reports success — every write/command approved through the gate — using only the local model.
 
 ---
 

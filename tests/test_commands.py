@@ -7,8 +7,8 @@ import io
 from prompt_toolkit.keys import Keys
 from rich.console import Console
 
-from agentcli.core.state import SessionState
-from agentcli.ui.repl import _build_key_bindings, parse_command
+from arescode.core.state import SessionState
+from arescode.ui.repl import _build_key_bindings, parse_command
 
 
 def _console() -> Console:

@@ -1,4 +1,4 @@
-# agentcli
+# AresCode
 
 A Claude Code–style terminal coding agent powered by **local models via Ollama**
 (primary target: `qwen2.5-coder:7b`). Single-threaded agent loop, text-based action
@@ -14,7 +14,7 @@ OpenAI-compatible endpoint, an interactive REPL (multiline input, slash commands
 live markdown rendering), and session save/resume — on top of the Phase 0 foundation
 (installable package, layered config, test harness, CI).
 
-Run `agentcli` and start chatting; `agentcli --resume` continues your last session.
+Run `arescode` and start chatting; `arescode --resume` continues your last session.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ pip install -e ".[dev]"
 
 ruff check .                       # lint
 pytest                             # tests
-python -m agentcli                 # launch (prints active model + context size)
+python -m arescode                 # launch (prints active model + context size)
 python scripts/check_ollama.py     # verify the local Ollama server (TASKS 0.6)
 ```
 
@@ -41,6 +41,6 @@ python scripts/check_ollama.py     # verify the local Ollama server (TASKS 0.6)
 Settings are layered lowest → highest precedence:
 
 1. Built-in defaults
-2. `~/.agentcli/config.toml` (global)
-3. `./.agentcli.toml` (per project)
+2. `~/.arescode/config.toml` (global)
+3. `./.arescode.toml` (per project)
 4. CLI flags (`--model`, `--ctx`)

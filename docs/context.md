@@ -1,10 +1,10 @@
-# Project Context — Local Coding Agent CLI
+# Project Context — AresCode
 
 > A Claude Code–style terminal coding agent that runs entirely on local models via Ollama.
 > This document is the single source of truth for the project's goals, architecture, design decisions, and structure. Feed it to any AI assistant or new collaborator to get them fully up to speed.
 
 **Status:** Pre-development (architecture finalized)
-**Working name:** `agent-cli` (rename later)
+**Name:** `AresCode`
 **Primary model target:** `qwen2.5-coder:7b` via Ollama
 **Author:** Om — solo project
 
@@ -25,7 +25,7 @@ A CLI tool that works like Claude Code but is powered by locally installed model
 2. Six core tools: `read_file`, `write_file`, `edit_file`, `bash`, `grep`, `glob`
 3. Single-threaded agent loop with a hard step cap
 4. Permission gate (auto-allow reads, confirm writes/shell with diff previews)
-5. Context management: repo map, `AGENT.md` project memory, token-budget compaction
+5. Context management: repo map, `ARES.md` project memory, token-budget compaction
 6. Session persistence (save/resume conversation state)
 
 **Explicitly deferred (post-MVP):** sub-agents, MCP support, TODO planner, tree-sitter symbol maps, multi-model routing, IDE integration, hooks, custom slash commands.
@@ -81,7 +81,7 @@ Layered, single-threaded, one flat message history. Modeled on Claude Code's mas
                           └────────────────────┘
 ```
 
-**Turn flow:** user prompt → context assembly (system prompt + repo map + AGENT.md + compacted history) → model call → lenient parse of actions → each action passes the permission gate → executor runs it → truncated result appended to history → loop. When the model emits plain text with no actions, the turn ends and control returns to the REPL.
+**Turn flow:** user prompt → context assembly (system prompt + repo map + ARES.md + compacted history) → model call → lenient parse of actions → each action passes the permission gate → executor runs it → truncated result appended to history → loop. When the model emits plain text with no actions, the turn ends and control returns to the REPL.
 
 ---
 
@@ -175,7 +175,7 @@ No more tools until the MVP works end-to-end. Every added tool measurably dilute
 Small models die silently when context bloats. Three mechanisms:
 
 1. **Repo map** — built at session start: gitignore-filtered file tree with sizes, injected into the system prompt (capped ~1,500 tokens). Post-MVP: tree-sitter top-level symbols per file, Aider-style. **No embeddings/RAG in v1** — the agent navigates with grep/read like Claude Code does.
-2. **Project memory (`AGENT.md`)** — user-editable Markdown in the project root: conventions, commands, architecture notes. Loaded into every system prompt. Direct clone of the CLAUDE.md pattern. The agent may propose additions but only writes to it with permission.
+2. **Project memory (`ARES.md`)** — user-editable Markdown in the project root: conventions, commands, architecture notes. Loaded into every system prompt. Direct clone of the CLAUDE.md pattern. The agent may propose additions but only writes to it with permission.
 3. **Compaction** — token count estimated at `len(text) // 4`. At 75% of the context budget, summarize the oldest turns into a single assistant message ("Summary of earlier work: …") and drop the originals. **Never compact:** the system prompt, the current user task statement, and the last 4 tool results.
 
 **Context budget config:** default `num_ctx = 16384`. (See 4.7 — Ollama's silent 4k default is a known killer.)
@@ -207,7 +207,7 @@ Deny-first philosophy, per-action approval:
 
 ### 4.8 System prompt (`prompts/system.md`)
 
-Versioned in the repo, never hardcoded in Python. Contents: role definition, the action protocol spec with 2–3 few-shot examples per tool, the SEARCH/REPLACE rules, "read before you edit" and "run tests after edits" behavioral rules, the repo map, and AGENT.md contents. Keep the static portion under ~2,000 tokens — every token here is paid every single model call.
+Versioned in the repo, never hardcoded in Python. Contents: role definition, the action protocol spec with 2–3 few-shot examples per tool, the SEARCH/REPLACE rules, "read before you edit" and "run tests after edits" behavioral rules, the repo map, and ARES.md contents. Keep the static portion under ~2,000 tokens — every token here is paid every single model call.
 
 ---
 
@@ -220,7 +220,7 @@ Versioned in the repo, never hardcoded in Python. Contents: role definition, the
 | REPL / input | `prompt_toolkit` | Multiline input, history, keybindings, interrupt handling |
 | Terminal rendering | `rich` | Markdown, syntax highlighting, colored diffs, spinners |
 | CLI entry | `typer` | Clean arg parsing, subcommands |
-| Config & schemas | `pydantic` + TOML (`~/.agentcli/config.toml` + per-project `.agentcli.toml`) | Validated config, layered overrides |
+| Config & schemas | `pydantic` + TOML (`~/.arescode/config.toml` + per-project `.arescode.toml`) | Validated config, layered overrides |
 | Gitignore handling | `pathspec` | Filter repo map and glob results |
 | Git operations | `subprocess` git (raw) | Fewer deps; GitPython only if it earns its place |
 | Fuzzy matching | stdlib `difflib` | Edit-block cascade step 3 |
@@ -233,13 +233,13 @@ Versioned in the repo, never hardcoded in Python. Contents: role definition, the
 ## 6. Project structure
 
 ```
-agent-cli/
+AresCode/
 ├── pyproject.toml
 ├── README.md
 ├── context.md                 # this file
 ├── prompts/
 │   └── system.md              # versioned system prompt
-├── src/agentcli/
+├── src/arescode/
 │   ├── main.py                # typer entry point, session bootstrap
 │   ├── config.py              # pydantic settings, TOML loading (global + project)
 │   ├── core/
@@ -278,7 +278,7 @@ agent-cli/
 2. **M2 — Act:** parser + `read_file`, `bash`, `grep`, `glob` + the loop. Agent can explore a repo and run tests. *(Proves: the loop terminates correctly.)*
 3. **M3 — Edit:** SEARCH/REPLACE applier + retry-with-feedback + whole-file fallback. The make-or-break milestone. *(Proves: edits land reliably on a 7B model.)*
 4. **M4 — Trust:** permission gate, diff previews, path sandboxing, blocklist.
-5. **M5 — Endure:** compaction, AGENT.md, repo map, session save/resume.
+5. **M5 — Endure:** compaction, ARES.md, repo map, session save/resume.
 6. **M6 — Polish:** slash commands (`/clear`, `/compact`, `/model`, `/allow`), config file, packaging (`pipx install`).
 
 Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n) on a real project.
