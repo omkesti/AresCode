@@ -1,7 +1,8 @@
 """Interactive REPL: prompt_toolkit input, slash commands, streaming responses.
 
-Multiline input (Alt+Enter submits), persistent history, Ctrl+C cancels the current
-generation without killing the session, Ctrl+D exits (context.md §3, TASKS 1.3 / 1.6).
+Enter sends; Ctrl+J (or Alt+Enter where the terminal allows it) inserts a newline.
+Persistent history, Ctrl+C cancels the current generation without killing the session,
+Ctrl+D exits (context.md §3, TASKS 1.3 / 1.6).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Literal
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from agentcli.config import Config
@@ -28,8 +30,8 @@ Commands:
   /model <name>    switch the active model (no arg shows the current one)
   /exit, /quit     leave agentcli
 Input:
-  Enter            insert a newline
-  Alt+Enter        send the message
+  Enter            send the message
+  Ctrl+J           insert a newline (also Alt+Enter where the terminal allows it)
   Ctrl+C           cancel the current response
   Ctrl+D           exit
 """
@@ -70,6 +72,28 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
     return Command(action="continue")
 
 
+def _build_key_bindings() -> KeyBindings:
+    """Enter sends; Ctrl+J and Alt+Enter insert a newline.
+
+    prompt_toolkit's default multiline binding is the opposite (Enter=newline,
+    Alt+Enter=submit), which is unintuitive for chat and unusable on Windows Terminal,
+    where Alt+Enter is intercepted as the fullscreen toggle and never reaches the app.
+    So we bind Enter to submit and give newlines dedicated keys.
+    """
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _submit(event) -> None:
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("c-j")  # Ctrl+J: reliable newline in every terminal
+    @kb.add("escape", "enter")  # Alt+Enter: newline where the terminal delivers it
+    def _newline(event) -> None:
+        event.current_buffer.insert_text("\n")
+
+    return kb
+
+
 def _history_path() -> Path:
     directory = Path.home() / ".agentcli"
     directory.mkdir(parents=True, exist_ok=True)
@@ -100,6 +124,7 @@ async def run(*, config: Config, project_dir: Path, resume: bool = False) -> Non
     prompt_session: PromptSession = PromptSession(
         history=FileHistory(str(_history_path())),
         multiline=True,
+        key_bindings=_build_key_bindings(),
     )
 
     while True:

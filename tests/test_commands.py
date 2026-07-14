@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import io
 
+from prompt_toolkit.keys import Keys
 from rich.console import Console
 
 from agentcli.core.state import SessionState
-from agentcli.ui.repl import parse_command
+from agentcli.ui.repl import _build_key_bindings, parse_command
 
 
 def _console() -> Console:
@@ -47,3 +48,11 @@ def test_help_and_unknown_continue():
     state = SessionState.new("m")
     assert parse_command("/help", state, _console()).action == "continue"
     assert parse_command("/bogus", state, _console()).action == "continue"
+
+
+def test_enter_submits_and_newline_keys_are_bound():
+    # Guards the fix for the "Enter does nothing" freeze: Enter must submit, not newline.
+    bindings = {b.keys: b.handler.__name__ for b in _build_key_bindings().bindings}
+    assert bindings[(Keys.ControlM,)] == "_submit"  # Enter -> send
+    assert bindings[(Keys.ControlJ,)] == "_newline"  # Ctrl+J -> newline
+    assert bindings[(Keys.Escape, Keys.ControlM)] == "_newline"  # Alt+Enter -> newline

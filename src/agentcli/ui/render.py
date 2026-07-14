@@ -22,7 +22,7 @@ def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> N
     console.print(f"[bold]agentcli[/bold]  model=[cyan]{model}[/cyan]  num_ctx={num_ctx}")
     console.print(f"[dim]project: {project_dir}[/dim]")
     console.print(
-        "[dim]Enter for a newline - Alt+Enter to send - /help for commands - Ctrl+D to quit[/dim]"
+        "[dim]Enter to send - Ctrl+J for a newline - /help for commands - Ctrl+D to quit[/dim]"
     )
 
 
