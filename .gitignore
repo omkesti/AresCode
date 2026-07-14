@@ -1,0 +1,27 @@
+# Byte-compiled / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# agentcli runtime state (autosaved sessions, logs)
+.agentcli/
+
+# Secrets / local env
+.env
+
+# OS cruft
+.DS_Store
+Thumbs.db
