@@ -42,8 +42,9 @@ class Approval(NamedTuple):
     remember: bool = False
 
 
-# A callable the UI supplies to answer an ASK verdict (see ui/approve.py).
-Approver = Callable[["Action", Verdict], Approval]
+# A callable the UI supplies to answer an ASK verdict, given a precomputed change preview
+# (a unified diff for writes/edits, "" for shell). See ui/approve.py.
+Approver = Callable[["Action", Verdict, str], Approval]
 
 _ALLOW = Verdict(Decision.ALLOW)
 

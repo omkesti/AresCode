@@ -7,7 +7,9 @@ to after repeated misses; that path validates the replacement looks complete bef
 Also holds write_file (new files only) and per-session edit telemetry
 (context.md §4.3, TASKS 3.1-3.4 / 3.6).
 
-Authored under an explicit user override of decision D10 for Phase 3.
+Authored under an explicit user override of decision D10 for Phase 3. The Phase 4 read-only
+dry-run previews (``preview_edit`` / ``preview_write``) were added by Claude Code under the author's
+explicit authorization to modify ``[HAND]`` files; the ``apply_edit`` cascade itself is unchanged.
 """
 
 from __future__ import annotations
@@ -267,6 +269,46 @@ def apply_edit(
     diff = _unified_diff(path, before, after)
     target.write_text(after, encoding="utf-8")
     return EditResult(True, f"edited {path} via {', '.join(tiers)}", diff=diff, tier=tiers[-1])
+
+
+def preview_edit(project_dir: Path, path: str, edits: tuple) -> str:
+    """Dry-run the edit cascade (no writes, no telemetry) to build the diff shown before applying.
+
+    Mirrors ``apply_edit``'s matching through the same ``find_match`` cascade — so preview and apply
+    agree — but never touches the file or ``EditStats``. Returns ``""`` when a clean preview can't
+    be produced (a miss, an ambiguity, an invalid whole-file rewrite, or a no-op), in which case the
+    caller falls back to showing the raw proposed change. ``apply_edit`` remains the single source
+    of truth for what actually gets written.
+    """
+    target = (project_dir / path).resolve()
+    if not target.exists() or target.is_dir():
+        return ""
+    before = target.read_text(encoding="utf-8", errors="replace")
+    lines = before.splitlines()
+    for sr in edits:
+        if sr.search.strip() == "":  # whole-file rewrite
+            valid, _ = _validate_whole_file(sr.replace)
+            if not valid:
+                return ""
+            lines = sr.replace.splitlines()
+            continue
+        outcome = find_match(lines, sr.search.splitlines())
+        if not isinstance(outcome, Match):
+            return ""
+        lines = lines[: outcome.start] + sr.replace.splitlines() + lines[outcome.end :]
+    after = _reattach_trailing_newline(before, "\n".join(lines))
+    if after == before:
+        return ""
+    return _unified_diff(path, before, after)
+
+
+def preview_write(project_dir: Path, path: str, content: str) -> str:
+    """The diff a ``write_file`` would produce (new file), or ``""`` if content is rejected."""
+    valid, _ = _validate_whole_file(content)
+    if not valid:
+        return ""
+    body = content if content.endswith("\n") else content + "\n"
+    return _unified_diff(path, "", body)
 
 
 def _no_match_feedback(path: str, outcome: NoMatch, prior_failures: int, small_file: bool) -> str:

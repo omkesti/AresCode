@@ -148,7 +148,9 @@ async def run(
     provider = OpenAICompatProvider.from_config(config)
     gate = Gate.from_config(project_dir, config)
     approver = auto_approver(console) if yolo else interactive_approver(console)
-    executor = Executor(project_dir, config, gate=gate, approver=approver)
+    # The loop runs the interactive gate (allow/ask/approve); the executor shares the same gate as
+    # a hard-deny backstop so a blocklisted command or path escape can never slip through.
+    executor = Executor(project_dir, config, gate=gate)
     observer = render.ConsoleObserver(console, verbose=False)
     system_prompt = load_system_prompt()
     state = _load_session(project_dir, config, console, resume=resume)
@@ -213,6 +215,8 @@ async def run(
                 system_prompt=system_prompt,
                 observer=observer,
                 max_steps=config.max_steps,
+                gate=gate,
+                approver=approver,
             )
         )
         try:

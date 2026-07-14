@@ -1,8 +1,9 @@
-"""Interactive permission approval: a preview plus a single-keystroke y / n / a answer.
+"""Interactive permission approval: a change preview plus a single-keystroke y / n / a answer.
 
 The gate (permissions/gate.py) decides ALLOW / ASK / DENY from parsed action fields alone; when
-the verdict is ASK, the loop calls one of these approvers to get the user's answer. ``a`` (always)
-is offered only when the verdict carries a scope to remember — a bash command token or a file path
+the verdict is ASK, the loop computes a preview (a unified diff for writes/edits, "" for shell)
+and calls one of these approvers to get the user's answer. ``a`` (always) is offered only when the
+verdict carries a scope to remember — a bash command token or a file path
 (context.md §4.6, TASKS 4.1 / 4.5).
 """
 
@@ -14,7 +15,7 @@ from rich.console import Console
 from rich.text import Text
 
 from arescode.permissions.gate import Approval, Approver, Verdict
-from arescode.tools.registry import Action, EditFileAction, WriteFileAction, action_summary
+from arescode.tools.registry import Action, action_summary
 
 PREVIEW_LINES = 12
 
@@ -22,17 +23,17 @@ PREVIEW_LINES = 12
 def auto_approver(console: Console) -> Approver:
     """--yolo mode: approve every ASK verdict (hard denials still bite before we get here)."""
 
-    def approve(action: Action, verdict: Verdict) -> Approval:
+    def approve(action: Action, verdict: Verdict, preview: str) -> Approval:
         return Approval(approved=True)
 
     return approve
 
 
 def interactive_approver(console: Console) -> Approver:
-    """Prompt the user with a preview and read a single keystroke (y / n / a)."""
+    """Prompt the user with the change preview and read a single keystroke (y / n / a)."""
 
-    def approve(action: Action, verdict: Verdict) -> Approval:
-        _render_request(console, action, verdict)
+    def approve(action: Action, verdict: Verdict, preview: str) -> Approval:
+        _render_request(console, action, verdict, preview)
         key = _read_key()
         console.print()  # end the prompt line after the keystroke
         if key == "a" and verdict.scope:
@@ -44,12 +45,13 @@ def interactive_approver(console: Console) -> Approver:
     return approve
 
 
-def _render_request(console: Console, action: Action, verdict: Verdict) -> None:
+def _render_request(console: Console, action: Action, verdict: Verdict, preview: str) -> None:
     console.print(
         f"[yellow]permission needed[/yellow] [bold]{action.tool}[/bold] "
         f"[dim]{action_summary(action)}[/dim]"
     )
-    _render_preview(console, action)
+    if preview:
+        _render_diff(console, preview)
     always = ""
     if verdict.scope == "command" and verdict.key:
         always = f" / [a]lways allow '{verdict.key}'"
@@ -58,30 +60,23 @@ def _render_request(console: Console, action: Action, verdict: Verdict) -> None:
     console.print(f"  [y]es / [n]o{always} > ", end="")
 
 
-def _render_preview(console: Console, action: Action) -> None:
-    """Preview what a write/edit will change; bash needs no preview beyond its command line."""
-    if isinstance(action, WriteFileAction):
-        _print_capped(console, action.content.splitlines(), prefix="+", style="green")
-    elif isinstance(action, EditFileAction):
-        shown = 0
-        for sr in action.edits:
-            for line in sr.search.splitlines():
-                console.print(Text(f"  - {line}", style="red"))
-                shown += 1
-            for line in sr.replace.splitlines():
-                console.print(Text(f"  + {line}", style="green"))
-                shown += 1
-            if shown >= PREVIEW_LINES:
-                console.print(Text("  ...", style="dim"))
-                break
-
-
-def _print_capped(console: Console, lines: list[str], *, prefix: str, style: str) -> None:
+def _render_diff(console: Console, diff: str) -> None:
+    lines = diff.splitlines()
     for line in lines[:PREVIEW_LINES]:
-        console.print(Text(f"  {prefix} {line}", style=style))
+        if line.startswith(("+++", "---")):
+            style = "dim"
+        elif line.startswith("+"):
+            style = "green"
+        elif line.startswith("-"):
+            style = "red"
+        elif line.startswith("@@"):
+            style = "cyan"
+        else:
+            style = "dim"
+        console.print(Text("  " + line, style=style))
     hidden = len(lines) - PREVIEW_LINES
     if hidden > 0:
-        console.print(Text(f"  ... +{hidden} more line(s)", style="dim"))
+        console.print(Text(f"  ... +{hidden} more diff line(s)", style="dim"))
 
 
 def _read_key() -> str:

@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from arescode.permissions.gate import Approver, Decision, Gate
+from arescode.permissions.gate import Decision, Gate
 from arescode.tools.base import ToolError
-from arescode.tools.edit import EditStats, apply_edit, write_new_file
+from arescode.tools.edit import EditStats, apply_edit, preview_edit, preview_write, write_new_file
 from arescode.tools.files import read_file
 from arescode.tools.search import glob_files, grep
 from arescode.tools.shell import run_bash
@@ -143,9 +143,11 @@ _READONLY = (ReadFileAction, GrepAction, GlobAction)
 class Executor:
     """Dispatches an action to its tool implementation, within a fixed project dir.
 
-    When a ``gate`` is supplied every action passes the permission gate before it runs: hard
-    denials become failed results the model sees as tool errors, and ASK verdicts are routed to
-    ``approver`` (the interactive prompt). With no gate (tests, headless runs) every action runs.
+    The interactive gate (allow / ask / approve) lives in ``core/loop.py``. When a ``gate`` is
+    supplied here it is a belt-and-suspenders **hard-deny** check only: a blocklisted command or a
+    path escape can never execute, regardless of caller. ASK verdicts pass straight through —
+    their approval already happened in the loop before ``run`` was called. With no gate (tests,
+    headless runs) every action runs.
     """
 
     project_dir: Path
@@ -153,7 +155,6 @@ class Executor:
     result_max_lines: int = field(default=200)
     stats: EditStats = field(default_factory=EditStats)
     gate: Gate | None = None
-    approver: Approver | None = None
     _edit_failures: dict[str, int] = field(default_factory=dict)
 
     def is_readonly(self, action: Action) -> bool:
@@ -169,26 +170,23 @@ class Executor:
             return ToolResult(getattr(action, "tool", "unknown"), ok=False, output=str(exc),
                               summary="error")
 
+    def preview(self, action: Action) -> str:
+        """Unified diff of the change a write/edit would make (for the approval prompt); else ""."""
+        if isinstance(action, WriteFileAction):
+            return preview_write(self.project_dir, action.path, action.content)
+        if isinstance(action, EditFileAction):
+            return preview_edit(self.project_dir, action.path, action.edits)
+        return ""
+
     def _check_permission(self, action: Action) -> ToolResult | None:
-        """Consult the gate; return a denial ToolResult, or None to proceed with the action."""
+        """Enforce only the model-unoverridable hard denials; ASK/ALLOW proceed (see class doc)."""
         if self.gate is None:
             return None
-        tool = getattr(action, "tool", "unknown")
         verdict = self.gate.check(action)
-        if verdict.decision is Decision.ALLOW:
-            return None
         if verdict.decision is Decision.DENY:
-            return ToolResult(tool, ok=False, output=f"permission denied: {verdict.reason}",
-                              summary="denied")
-        # ASK: hand off to the interactive approver (auto-deny if none is wired).
-        approval = self.approver(action, verdict) if self.approver is not None else None
-        if approval is not None and approval.approved:
-            if approval.remember:
-                self.gate.allow_always(verdict)
-            return None
-        return ToolResult(tool, ok=False,
-                          output="permission denied by the user; do not retry this action",
-                          summary="denied")
+            return ToolResult(getattr(action, "tool", "unknown"), ok=False,
+                              output=f"permission denied: {verdict.reason}", summary="denied")
+        return None
 
     def _dispatch(self, action: Action) -> ToolResult:
         if isinstance(action, ReadFileAction):

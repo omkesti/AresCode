@@ -8,7 +8,9 @@ Guards: a hard step cap, an interrupt flag checked between steps, and duplicate-
 (identical consecutive tool+args -> a nudge instead of re-running) to break the "re-read the same
 file forever" pathology of weak models (context.md §4.1, TASKS 2.6).
 
-Authored under an explicit user override of decision D10 for Phase 2.
+Authored under an explicit user override of decision D10 for Phase 2. The Phase 4 permission-gate
+wiring (``_permit`` plus the ``gate`` / ``approver`` parameters, per context.md §4.6) was added by
+Claude Code under the author's explicit authorization to modify ``[HAND]`` files.
 """
 
 from __future__ import annotations
@@ -16,12 +18,16 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from arescode.core.parser import parse
 from arescode.core.state import SessionState
+from arescode.permissions.gate import Approval, Decision
 from arescode.providers.base import ModelProvider, ProviderError
 from arescode.tools.registry import Action, Executor, ToolResult, action_summary, format_observation
+
+if TYPE_CHECKING:
+    from arescode.permissions.gate import Approver, Gate
 
 DUPLICATE_NUDGE = (
     "You just issued the same action again — it will not give new information. Take a different "
@@ -59,6 +65,43 @@ class NullObserver:
     def error(self, text: str) -> None: ...
 
 
+def _permit(
+    action: Action,
+    gate: Gate | None,
+    approver: Approver | None,
+    executor: Executor,
+    obs: LoopObserver,
+) -> ToolResult | None:
+    """Apply the permission gate to one action (context.md §4.6).
+
+    Returns None to run the action, or a denial ToolResult (fed back to the model as a tool error).
+    Auto-allows read-only tools; hard-denies path escapes and blocklisted commands without ever
+    prompting; and for an ASK verdict shows a change preview and routes the y/n/a answer through
+    ``approver`` — remembering an "always" answer for the rest of the session.
+    """
+    if gate is None:
+        return None
+    verdict = gate.check(action)
+    if verdict.decision is Decision.ALLOW:
+        return None
+    tool = getattr(action, "tool", "unknown")
+    if verdict.decision is Decision.DENY:
+        obs.notice(f"denied {tool}: {verdict.reason}")
+        return ToolResult(tool, ok=False, output=f"permission denied: {verdict.reason}",
+                          summary="denied")
+    # ASK: preview the change, then ask the user (auto-deny if no approver is wired).
+    preview = executor.preview(action)
+    approval = approver(action, verdict, preview) if approver is not None else Approval(False)
+    if approval.approved:
+        if approval.remember:
+            gate.allow_always(verdict)
+        return None
+    obs.notice(f"declined {tool}")
+    return ToolResult(tool, ok=False,
+                      output="permission denied by the user; do not retry this action",
+                      summary="denied")
+
+
 async def run_turn(
     user_msg: str,
     *,
@@ -69,6 +112,8 @@ async def run_turn(
     observer: LoopObserver | None = None,
     max_steps: int = 25,
     should_interrupt: Callable[[], bool] = lambda: False,
+    gate: Gate | None = None,
+    approver: Approver | None = None,
 ) -> str:
     """Drive one user turn to completion; returns the model's final plain-text answer."""
     obs = observer or NullObserver()
@@ -106,6 +151,13 @@ async def run_turn(
             if action == last_action or executed.get(action, 0) >= REPEAT_LIMIT:
                 obs.notice(f"skipped repeated {action.tool} ({action_summary(action)})")
                 observations.append(f"[skipped repeated {action.tool}]\n{DUPLICATE_NUDGE}")
+                continue
+            # Permission gate: allow / ask-and-approve / deny — before we start the clock, so a
+            # denial or the user's thinking time never counts as tool-execution latency.
+            denial = _permit(action, gate, approver, executor, obs)
+            if denial is not None:
+                observations.append(format_observation(action, denial))
+                last_action = action  # a repeat of a denied action is a no-op, not a re-prompt
                 continue
             obs.tool_start(action)
             started = time.perf_counter()

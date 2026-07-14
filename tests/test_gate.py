@@ -8,7 +8,7 @@ import os
 import pytest
 
 from arescode.config import Config
-from arescode.permissions.gate import Approval, Decision, Gate, _first_token
+from arescode.permissions.gate import Decision, Gate, _first_token
 from arescode.tools.registry import (
     BashAction,
     EditFileAction,
@@ -156,58 +156,44 @@ def test_gate_reads_only_action_fields_not_prose(tmp_path):
     assert gate.session_commands == set()  # nothing was allowlisted by the file
 
 
-# --- Executor integration --------------------------------------------------
+# --- Executor hard-deny + preview (belt-and-suspenders; TASKS 4.2) ---------
+# The interactive allow/ask/approve flow lives in the loop (see test_loop.py); the executor only
+# enforces hard denials and computes change previews.
 
-def _approver(approved: bool, remember: bool = False):
-    def approve(action, verdict):
-        return Approval(approved=approved, remember=remember)
-
-    return approve
-
-
-def test_executor_denies_blocklisted_command_without_running(tmp_path):
-    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path), approver=_approver(True))
+def test_executor_hard_denies_blocklisted_command(tmp_path):
+    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path))
     result = ex.run(BashAction("sudo rm -rf /"))
-    assert not result.ok
-    assert result.summary == "denied"
+    assert not result.ok and result.summary == "denied"
     assert "blocked command" in result.output
 
 
-def test_executor_denies_path_escape_write(tmp_path):
-    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path), approver=_approver(True))
+def test_executor_hard_denies_path_escape_write(tmp_path):
+    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path))
     result = ex.run(WriteFileAction("../escape.py", "print(1)"))
-    assert not result.ok
-    assert result.summary == "denied"
+    assert not result.ok and result.summary == "denied"
     assert not (tmp_path.parent / "escape.py").exists()  # never written
 
 
-def test_executor_runs_write_when_user_approves(tmp_path):
-    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path), approver=_approver(True))
+def test_executor_lets_ask_actions_run(tmp_path):
+    # ASK is the loop's job to approve; the executor only hard-denies, so an ASK write runs here.
+    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path))
     result = ex.run(WriteFileAction("x.py", "print(1)"))
     assert result.ok
     assert (tmp_path / "x.py").read_text() == "print(1)\n"
 
 
-def test_executor_refuses_write_when_user_declines(tmp_path):
-    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path), approver=_approver(False))
-    result = ex.run(WriteFileAction("x.py", "print(1)"))
-    assert not result.ok
-    assert result.summary == "denied"
-    assert not (tmp_path / "x.py").exists()
-
-
-def test_executor_remembers_always_answer(tmp_path):
-    gate = Gate(tmp_path)
-    ex = Executor(tmp_path, Config(), gate=gate, approver=_approver(True, remember=True))
-    ex.run(WriteFileAction("x.py", "a"))
-    # after 'always for this file', the same path is auto-allowed (no approver needed)
-    assert gate.check(WriteFileAction("x.py", "b")).decision is Decision.ALLOW
-
-
 def test_executor_without_gate_runs_everything(tmp_path):
-    # Backward-compatible: no gate => no prompting (the shape tests/headless runs rely on).
     result = Executor(tmp_path, Config()).run(WriteFileAction("x.py", "print(1)"))
     assert result.ok
+
+
+def test_executor_preview_edit_and_write(tmp_path):
+    (tmp_path / "m.py").write_text("a = 1\n")
+    ex = Executor(tmp_path, Config(), gate=Gate(tmp_path))
+    edit_preview = ex.preview(EditFileAction("m.py", (SearchReplace("a = 1", "a = 2"),)))
+    assert "-a = 1" in edit_preview and "+a = 2" in edit_preview
+    assert "+print(1)" in ex.preview(WriteFileAction("new.py", "print(1)"))
+    assert ex.preview(BashAction("ls")) == ""  # bash has no diff preview
 
 
 def gate_verdict(tmp_path, action) -> Decision:
