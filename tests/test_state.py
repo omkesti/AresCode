@@ -45,7 +45,7 @@ def test_clear_without_system_empties_history():
 
 
 def test_save_and_load_roundtrip(tmp_path):
-    state = SessionState.new("qwen2.5-coder:7b")
+    state = SessionState.new("qwen2.5-coder:14b-instruct")
     state.user("hello")
     state.assistant("hi")
     path = state.save(tmp_path)

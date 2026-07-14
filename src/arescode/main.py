@@ -12,7 +12,7 @@ from pathlib import Path
 
 import typer
 
-from arescode.config import load_config
+from arescode.config import load_config, migrate_legacy_paths
 
 app = typer.Typer(
     add_completion=False,
@@ -51,6 +51,11 @@ def start(
     """Launch the agent REPL in the current directory."""
     project_dir = Path.cwd()
     _validate_project_dir(project_dir)
+
+    # One-time rename migration: copy any agent-cli-era config/sessions to the arescode paths.
+    migrated = migrate_legacy_paths(project_dir)
+    if migrated:
+        typer.echo(f"info: migrated legacy agent-cli data to AresCode ({'; '.join(migrated)})")
 
     config = load_config(project_dir=project_dir, overrides={"model": model, "num_ctx": ctx})
 

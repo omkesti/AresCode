@@ -14,6 +14,7 @@ being silently ignored.
 
 from __future__ import annotations
 
+import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,11 @@ from pydantic import BaseModel, ConfigDict, Field
 GLOBAL_CONFIG_PATH = Path.home() / ".arescode" / "config.toml"
 PROJECT_CONFIG_NAME = ".arescode.toml"
 
+# Pre-rename ("agent-cli") locations, kept only so the one-time migration below can find them.
+LEGACY_GLOBAL_DIR = Path.home() / ".agentcli"
+LEGACY_PROJECT_CONFIG_NAME = ".agentcli.toml"
+LEGACY_PROJECT_STATE_DIR = ".agentcli"  # old per-project dir that held sessions/
+
 
 class Config(BaseModel):
     """Validated runtime configuration for a session."""
@@ -30,11 +36,17 @@ class Config(BaseModel):
     # protected_namespaces=() silences pydantic's warning about the ``model`` field name.
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    model: str = Field(default="qwen2.5-coder:7b", description="Ollama model tag to run.")
+    # Primary target is now the 14B instruct tag (stronger instruction-following than 7B); the
+    # harness stays unchanged (D11). Set model = "qwen2.5-coder:7b" in config for a faster fallback.
+    model: str = Field(
+        default="qwen2.5-coder:14b-instruct", description="Ollama model tag to run."
+    )
     base_url: str = Field(
         default="http://localhost:11434/v1",
         description="OpenAI-compatible endpoint base URL.",
     )
+    # 16384 is a good default. 14B Q4 is ~9GB of weights and the KV cache grows with num_ctx, so on
+    # a <12GB GPU Ollama offloads to CPU (slower) — drop this to 8192 if generation is too slow.
     num_ctx: int = Field(default=16384, gt=0, description="Context window size in tokens.")
     temperature: float = Field(default=0.1, ge=0.0, description="Sampling temperature.")
     max_steps: int = Field(default=25, gt=0, description="Hard cap on agent loop steps per turn.")
@@ -86,3 +98,38 @@ def load_config(
         merged.update({key: value for key, value in overrides.items() if value is not None})
 
     return Config(**merged)
+
+
+def migrate_legacy_paths(project_dir: Path | None = None) -> list[str]:
+    """Copy pre-rename ``agent-cli`` config/sessions to their ``arescode`` locations, once.
+
+    Each move fires only when the old path exists and the new one does not, so it never
+    clobbers current data; we *copy* rather than move so an older build still finds its files.
+    Returns a short human-readable description of each path migrated (empty when nothing to do),
+    which the caller prints as a single info line on startup.
+    """
+    project_dir = project_dir or Path.cwd()
+    new_global_dir = GLOBAL_CONFIG_PATH.parent
+    migrated: list[str] = []
+
+    # Global config/state directory: ~/.agentcli -> ~/.arescode
+    if LEGACY_GLOBAL_DIR.is_dir() and not new_global_dir.exists():
+        shutil.copytree(LEGACY_GLOBAL_DIR, new_global_dir)
+        migrated.append(f"{LEGACY_GLOBAL_DIR} -> {new_global_dir}")
+
+    # Per-project config file: ./.agentcli.toml -> ./.arescode.toml
+    legacy_cfg = project_dir / LEGACY_PROJECT_CONFIG_NAME
+    new_cfg = project_dir / PROJECT_CONFIG_NAME
+    if legacy_cfg.is_file() and not new_cfg.exists():
+        shutil.copy2(legacy_cfg, new_cfg)
+        migrated.append(f"{legacy_cfg.name} -> {new_cfg.name}")
+
+    # Per-project sessions: ./.agentcli/sessions -> ./.arescode/sessions
+    legacy_sessions = project_dir / LEGACY_PROJECT_STATE_DIR / "sessions"
+    new_sessions = project_dir / ".arescode" / "sessions"
+    if legacy_sessions.is_dir() and not new_sessions.exists():
+        new_sessions.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(legacy_sessions, new_sessions)
+        migrated.append(f"{legacy_sessions} -> {new_sessions}")
+
+    return migrated

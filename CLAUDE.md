@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **AresCode** is a Claude Code–style terminal coding agent powered by **local models via Ollama**
-(primary target: `qwen2.5-coder:7b`). Package/command/import name is `arescode` (lowercase); the
-brand is "AresCode".
+(primary target: `qwen2.5-coder:14b-instruct`; `qwen2.5-coder:7b` is the low-VRAM fallback).
+Package/command/import name is `arescode` (lowercase); the brand is "AresCode".
 
 `docs/context.md` is the architecture source of truth and `docs/TASKS.md` is the phased plan —
 read the relevant section before non-trivial work rather than re-deriving intent. This file
@@ -59,7 +59,7 @@ python scripts/check_ollama.py    # verify the local Ollama server (endpoint + m
 ## The one constraint everything follows from
 
 **The target model is drastically weaker than frontier models.** Claude Code gets away with a
-minimal harness because Claude is smart; a 7B model is not. So AresCode is deliberately
+minimal harness because Claude is smart; a local model is not. So AresCode is deliberately
 **harness-heavy**, and the litmus test for every decision is:
 
 > "Would this work if the model gets it 80% right?" If a design needs 99% model accuracy, fix the
@@ -68,7 +68,9 @@ minimal harness because Claude is smart; a 7B model is not. So AresCode is delib
 That means: training-familiar text output protocols (not free-form JSON), lenient forgiving
 parsers, retry-with-error-feedback on failed edits, a tiny 6-tool surface, and aggressive context
 discipline. Do not "simplify" the harness by trusting the model to be reliable — reliability is
-supposed to live in the harness.
+supposed to live in the harness. The default model is now the stronger `qwen2.5-coder:14b-instruct`
+(D11), but the harness is unchanged: none of it was a 7B workaround, it is model-robustness, and a
+stronger model raises the floor without removing the reason the floor exists.
 
 ## Architecture in brief (see `docs/context.md` §3–4)
 
@@ -94,7 +96,7 @@ supposed to live in the harness.
   author these; offer review/pairing and write their tests instead.
 - **`parser.py` and `edit.py` get the deepest test coverage** — table-driven tests over a corpus of
   real malformed model outputs collected during development (`tests/fixtures/model_outputs/`). This
-  is where 7B unreliability concentrates; treat coverage here as non-negotiable.
+  is where local-model unreliability concentrates; treat coverage here as non-negotiable.
 - **`num_ctx` must always be set explicitly** on Ollama calls (default 16384). Ollama silently
   defaults to 4096 regardless of model capability, which truncates context and masquerades as "the
   model is dumb." A reasoning failure? Check `num_ctx` first.

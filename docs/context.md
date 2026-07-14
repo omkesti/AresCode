@@ -5,7 +5,7 @@
 
 **Status:** Phases 0–4 complete (M1 Talk, M2 Act, M3 Edit, M4 Trust); Phase 5 (Endure) next
 **Name:** `AresCode`
-**Primary model target:** `qwen2.5-coder:7b` via Ollama
+**Primary model target:** `qwen2.5-coder:14b-instruct` via Ollama (fallback: `qwen2.5-coder:7b`)
 **Author:** Om — solo project
 
 ---
@@ -34,9 +34,9 @@ A CLI tool that works like Claude Code but is powered by locally installed model
 
 ## 2. The core design constraint
 
-**Everything in this architecture follows from one fact: qwen2.5-coder:7b is drastically weaker than the frontier models these harnesses were designed around.**
+**Everything in this architecture follows from one fact: a local coding model is drastically weaker than the frontier models these harnesses were designed around.**
 
-Claude Code gets away with a minimal harness because Claude is smart. A 7B model is not. Therefore this project is **harness-heavy**:
+Claude Code gets away with a minimal harness because Claude is smart. A local model is not. Therefore this project is **harness-heavy**:
 
 - Strict, training-familiar output protocols instead of free-form JSON
 - Lenient, forgiving parsers that absorb the model's formatting mistakes
@@ -45,6 +45,8 @@ Claude Code gets away with a minimal harness because Claude is smart. A 7B model
 - Aggressive context discipline (small models degrade fast as context grows)
 
 **Rule of thumb for every design decision:** "Would this work if the model gets it 80% right?" If the answer requires 99% model accuracy, redesign the harness, not the prompt.
+
+**On the model upgrade (D11).** The primary target is now `qwen2.5-coder:14b-instruct` rather than the original `qwen2.5-coder:7b`. The 14B is a noticeably stronger instruction-follower, but **the harness above is retained unchanged.** None of it was a 7B-specific workaround — the lenient parser, retry loops, whole-file fallback, and 6-tool surface are *model-robustness* measures that keep the agent reliable across any local model (and across a bad generation from a good one). A stronger model raises the floor; it does not remove the reason the floor exists. The 80%-right rule of thumb still governs every decision.
 
 ---
 
@@ -73,7 +75,7 @@ Layered, single-threaded, one flat message history. Modeled on Claude Code's mas
 └───────┬─────────┘                 │ approved
 ┌───────▼─────────┐      ┌─────────▼──────────┐
 │ Ollama server    │      │ Tool executor      │
-│ qwen2.5-coder:7b │      │ read·edit·bash·grep│
+│ qwen2.5-coder:14b│      │ read·edit·bash·grep│
 └──────────────────┘      └─────────┬──────────┘
                           ┌─────────▼──────────┐
                           │ Workspace          │
@@ -155,7 +157,7 @@ The parser is written assuming the model *almost* gets the format right. It must
    `"SEARCH block not found in src/auth.py. Closest match (line 42, 87% similar): <snippet>. Re-read the file and retry with the exact current content."`
    Retry cap: 2–3 per edit, then fall back to whole-file mode.
 
-**Testing priority:** `parser.py` and `edit.py` get the deepest test coverage in the project — table-driven tests over a corpus of real malformed model outputs collected during development. This is where 7B unreliability concentrates.
+**Testing priority:** `parser.py` and `edit.py` get the deepest test coverage in the project — table-driven tests over a corpus of real malformed model outputs collected during development. This is where local-model unreliability concentrates.
 
 ### 4.4 Tool set (MVP — exactly six)
 
@@ -203,7 +205,8 @@ Deny-first philosophy, per-action approval:
 - **No LangChain / LiteLLM.** The abstraction is ~50 lines; owning it is the point.
 
 **Ollama-specific gotchas (hard-won, do not skip):**
-- `num_ctx` **must be set explicitly** — Ollama defaults to 4096 tokens regardless of model capability, which silently truncates agent context and looks like "the model is dumb." Set 16k default; 32k is qwen2.5-coder's max but watch KV-cache VRAM on the RTX 3050 6GB (7B Q4 + 32k KV cache will spill to RAM and crawl).
+- `num_ctx` **must be set explicitly** — Ollama defaults to 4096 tokens regardless of model capability, which silently truncates agent context and looks like "the model is dumb." Set 16k default; 32k is qwen2.5-coder's max but watch KV-cache VRAM.
+- **14B VRAM budget:** `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights, and the KV cache grows with `num_ctx` on top of that. On a GPU with <12GB VRAM (e.g. an RTX 3050 6GB) Ollama offloads layers to the CPU and generation slows sharply; the weights + a large KV cache spill to system RAM and crawl. Mitigation: drop `num_ctx` to 8192, or fall back to `qwen2.5-coder:7b` (≈4.7GB) on low-VRAM machines.
 - `temperature`: 0.0–0.2 for agentic work.
 - `keep_alive`: set generously (e.g. `30m`) so the model isn't reloaded between turns.
 
@@ -278,7 +281,7 @@ AresCode/
 
 1. **M1 — Talk:** provider + streaming REPL. Chat with qwen2.5-coder in the terminal with rendered markdown. *(Proves: streaming, num_ctx config.)*
 2. **M2 — Act:** parser + `read_file`, `bash`, `grep`, `glob` + the loop. Agent can explore a repo and run tests. *(Proves: the loop terminates correctly.)*
-3. **M3 — Edit:** SEARCH/REPLACE applier + retry-with-feedback + whole-file fallback. The make-or-break milestone. *(Proves: edits land reliably on a 7B model.)*
+3. **M3 — Edit:** SEARCH/REPLACE applier + retry-with-feedback + whole-file fallback. The make-or-break milestone. *(Proves: edits land reliably on a local model.)*
 4. **M4 — Trust:** permission gate, diff previews, path sandboxing, blocklist.
 5. **M5 — Endure:** compaction, ARES.md, repo map, session save/resume.
 6. **M6 — Polish:** slash commands (`/clear`, `/compact`, `/model`, `/allow`), config file, packaging (`pipx install`).
@@ -303,13 +306,15 @@ Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n
 | D8 | Deny-first permission gate, per-action approval | YOLO auto-approve mode | Safety default; auto-mode can be a flag later |
 | D9 | Python | TypeScript + Ink | Iteration speed for a solo dev; TS remains the "if rewriting" option |
 | D10 | Hand-write `loop.py` + `parser.py` first, no AI codegen | Full AI-assisted build | Explicit skill-building goal: these ~300 lines are the soul of the project |
+| D11 | Upgrade default model to `qwen2.5-coder:14b-instruct`; harness unchanged; re-baseline edit telemetry | Stay on 7B; or drop harness weight now that the model is stronger | Stronger instruction-following at a modest VRAM cost, with zero harness changes (robustness ≠ 7B workaround); 7B edit-success baselines are now stale and must be re-measured |
 
 ---
 
 ## 9. Known risks
 
-- **Edit reliability floor:** even with the full cascade, a 7B model may fail multi-file or long-range edits. Mitigation: whole-file fallback, small-diff prompting, and honest measurement (track edit success rate from day one).
-- **VRAM ceiling (RTX 3050 6GB):** 7B Q4 + large KV cache spills to system RAM. Mitigation: default 16k context, aggressive compaction, document `num_ctx`/VRAM tradeoffs.
+- **Edit reliability floor:** even with the full cascade, a local model may fail multi-file or long-range edits. Mitigation: whole-file fallback, small-diff prompting, and honest measurement (track edit success rate from day one).
+- **Stale edit-success baseline (post-D11):** every edit-success number to date — including Phase 3's ≥8/10 gauntlet result — was measured on `qwen2.5-coder:7b` and is now stale. The telemetry counters are *not* reset in code, but treat the recorded figures as unverified until Phase 3's 10-task edit gauntlet is re-run **once** on `qwen2.5-coder:14b-instruct` to establish the new baseline. `/stats` reports raw counters; it does not know which model produced them.
+- **VRAM ceiling (<12GB GPUs, e.g. RTX 3050 6GB):** `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights; on a sub-12GB GPU Ollama offloads to CPU and the weights + a large KV cache spill to system RAM and crawl. Mitigation: default 16k context (drop to 8192 on low VRAM), aggressive compaction, the `qwen2.5-coder:7b` fallback, and documented `num_ctx`/VRAM tradeoffs.
 - **Loop pathologies:** small models re-read the same file forever or declare victory early. Mitigation: step cap, duplicate-action detection (same tool + same args twice in a row → inject a nudge message).
 - **Prompt injection via tool results:** file contents and command output are untrusted. Gate logic never consults model prose; hardening is a tracked post-MVP item.
 - **Scope creep:** the Claude Code feature list is enormous. The MVP definition in §1 is the contract — anything else goes to a `LATER.md`.

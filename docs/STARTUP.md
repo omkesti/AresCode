@@ -24,11 +24,14 @@ Install these once and confirm each responds:
 | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) | 13+ | `rg --version` |
 | Git | any | `git --version` |
 
-Pull the target model (≈4.7 GB, one time):
+Pull the target model (14B Q4, ≈9 GB, one time):
 
 ```powershell
-ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:14b-instruct
 ```
+
+> On a GPU with <12 GB VRAM, Ollama offloads part of the 14B model to CPU (slower). If generation
+> is too slow, either drop `num_ctx` to 8192 or fall back to the smaller `qwen2.5-coder:7b`.
 
 Confirm it is installed and the server is up:
 
@@ -97,7 +100,7 @@ python scripts/check_ollama.py
 Options:
 
 ```powershell
-python scripts/check_ollama.py --model qwen2.5-coder:7b --ctx 16384 --base-url http://localhost:11434
+python scripts/check_ollama.py --model qwen2.5-coder:14b-instruct --ctx 16384 --base-url http://localhost:11434
 ```
 
 Expected: `PASS` lines for the model and completion, ending in `OK — all checks passed`.
@@ -121,7 +124,7 @@ python -m arescode
 Flag overrides and resume:
 
 ```powershell
-arescode --model qwen2.5-coder:7b --ctx 16384   # override model / context window
+arescode --model qwen2.5-coder:14b-instruct --ctx 16384   # override model / context window
 arescode --resume                               # continue the most recent session
 arescode --yolo                                 # auto-approve every action (hard denials still apply)
 ```
@@ -147,8 +150,9 @@ session). Path escapes outside the project root and blocklisted commands are ref
 **Ctrl+C** cancels the current response without ending the session. Sessions autosave to
 `.arescode/sessions/<timestamp>.json` after each reply.
 
-> First reply after a cold start is slow (~10 s) while the 7B model loads into VRAM;
-> subsequent replies are near-instant because `keep_alive` keeps it warm.
+> First reply after a cold start is slow while the 14B model loads into VRAM (longer than the 7B
+> did, and slower still if it spills to CPU on a <12 GB GPU); subsequent replies are near-instant
+> because `keep_alive` keeps it warm.
 
 ---
 
@@ -195,9 +199,10 @@ Settings are layered, lowest → highest precedence:
 Example `./.arescode.toml`:
 
 ```toml
-model = "qwen2.5-coder:7b"
+model = "qwen2.5-coder:14b-instruct"
+# model = "qwen2.5-coder:7b"        # faster, weaker fallback for low-VRAM machines
 base_url = "http://localhost:11434/v1"
-num_ctx = 16384
+num_ctx = 16384                     # 14B Q4 ≈ 9GB; KV cache grows with num_ctx — drop to 8192 if slow
 temperature = 0.1
 max_steps = 25
 request_timeout = 120.0
@@ -248,8 +253,8 @@ python scripts/check_ollama.py
 |---|---|
 | `ollama: command not found` | Install Ollama and reopen the terminal. |
 | `check_ollama.py` → connection refused | Start the server: `ollama serve`. |
-| Model missing in `check_ollama.py` | `ollama pull qwen2.5-coder:7b`. |
+| Model missing in `check_ollama.py` | `ollama pull qwen2.5-coder:14b-instruct`. |
 | Model feels "dumb" / truncated | Confirm `num_ctx` is set (Ollama silently defaults to 4096). |
 | PowerShell won't activate the venv | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then re-activate. |
 | `rg: command not found` in a search | Install ripgrep and ensure it's on `PATH`. |
-| VRAM thrash on the RTX 3050 (6 GB) | Lower `num_ctx` (e.g. 8192); large KV cache spills to RAM. |
+| 14B slow / VRAM thrash on a <12 GB GPU | Ollama offloaded to CPU; lower `num_ctx` (e.g. 8192), or fall back to `qwen2.5-coder:7b`. |

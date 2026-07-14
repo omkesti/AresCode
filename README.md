@@ -1,7 +1,7 @@
 # AresCode
 
 A Claude Code–style terminal coding agent powered by **local models via Ollama**
-(primary target: `qwen2.5-coder:7b`). Single-threaded agent loop, text-based action
+(primary target: `qwen2.5-coder:14b-instruct`). Single-threaded agent loop, text-based action
 protocol, lenient parsing — the reliability lives in the harness, not the model.
 
 See [`docs/context.md`](docs/context.md) for the full architecture and
@@ -25,7 +25,7 @@ Run `arescode` and ask it to fix a test or add a function; approve the writes it
 
 - Python 3.11+
 - [Ollama](https://ollama.com) running locally with a model pulled:
-  `ollama pull qwen2.5-coder:7b`
+  `ollama pull qwen2.5-coder:14b-instruct` (or `qwen2.5-coder:7b` for a faster, weaker fallback)
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on `PATH` (used by the search tool)
 
 ## Development
