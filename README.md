@@ -9,8 +9,12 @@ See [`docs/context.md`](docs/context.md) for the full architecture and
 
 ## Status
 
-Early development. **Phase 0 (foundation & scaffolding) complete:** installable
-package, layered configuration, CLI entry point, test harness, and CI.
+Early development. **Phase 1 (Talk) complete:** streaming provider over Ollama's
+OpenAI-compatible endpoint, an interactive REPL (multiline input, slash commands,
+live markdown rendering), and session save/resume — on top of the Phase 0 foundation
+(installable package, layered config, test harness, CI).
+
+Run `agentcli` and start chatting; `agentcli --resume` continues your last session.
 
 ## Requirements
 

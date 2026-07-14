@@ -1,12 +1,12 @@
-"""agentcli CLI entry point: parse flags, load layered config, bootstrap the session.
+"""agentcli CLI entry point: parse flags, load layered config, launch the REPL.
 
-Phase 0 wires the entry point end to end: validate the working directory, load
-configuration, and report the active model and context size. The interactive REPL
-(``ui/repl.py``) is added in Phase 1 (TASKS 1.3).
+Validates the working directory, resolves configuration, then hands off to the interactive
+chat loop in ``ui/repl.py`` (TASKS 1.3-1.6).
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -40,17 +40,18 @@ def start(
     ctx: int | None = typer.Option(
         None, "--ctx", help="Override the context window size (num_ctx)."
     ),
+    resume: bool = typer.Option(False, "--resume", help="Resume the most recent session."),
 ) -> None:
-    """Launch the agent in the current directory."""
+    """Launch the agent REPL in the current directory."""
     project_dir = Path.cwd()
     _validate_project_dir(project_dir)
 
     config = load_config(project_dir=project_dir, overrides={"model": model, "num_ctx": ctx})
 
-    typer.echo(f"agentcli | model={config.model} | num_ctx={config.num_ctx}")
-    typer.echo(f"project: {project_dir}")
-    # Phase 1 replaces the line below with the interactive REPL (ui/repl.py).
-    typer.echo("(Phase 0 scaffolding - the interactive REPL arrives in Phase 1. Exiting cleanly.)")
+    # Imported lazily so `--help` and startup stay fast and don't pull in the UI stack.
+    from agentcli.ui.repl import run
+
+    asyncio.run(run(config=config, project_dir=project_dir, resume=resume))
 
 
 def main() -> None:

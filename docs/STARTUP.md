@@ -4,8 +4,9 @@ Every command needed to set up, run, test, and verify the project, in the order 
 normally use them. Commands are given for **Windows PowerShell** (primary) with a
 **macOS/Linux (bash)** equivalent underneath where they differ.
 
-> Current stage: **Phase 0 (foundation)**. `agentcli` starts, loads config, prints the
-> active model + context size, and exits. The interactive REPL arrives in Phase 1.
+> Current stage: **Phase 1 (Talk)**. `agentcli` starts an interactive REPL: chat with the
+> local model with live streaming, slash commands, and session save/resume. Tool use and
+> file editing arrive in Phases 2-3.
 > See [`TASKS.md`](TASKS.md) for the roadmap and [`context.md`](context.md) for architecture.
 
 ---
@@ -115,13 +116,28 @@ Equivalent (no activation needed):
 python -m agentcli
 ```
 
-Flag overrides:
+Flag overrides and resume:
 
 ```powershell
-agentcli --model qwen2.5-coder:7b --ctx 16384
+agentcli --model qwen2.5-coder:7b --ctx 16384   # override model / context window
+agentcli --resume                               # continue the most recent session
 ```
 
-Phase 0 prints the resolved model + context size and exits cleanly (exit code 0).
+This opens the interactive REPL. Type a message and press **Alt+Enter** to send
+(Enter inserts a newline). In-REPL commands:
+
+| Command | Effect |
+|---|---|
+| `/help` | list commands |
+| `/clear` | reset the conversation history |
+| `/model <name>` | switch the active model |
+| `/exit`, `/quit` | leave (or press **Ctrl+D**) |
+
+**Ctrl+C** cancels the current response without ending the session. Sessions autosave to
+`.agentcli/sessions/<timestamp>.json` after each reply.
+
+> First reply after a cold start is slow (~10 s) while the 7B model loads into VRAM;
+> subsequent replies are near-instant because `keep_alive` keeps it warm.
 
 ---
 
