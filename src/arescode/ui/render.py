@@ -22,6 +22,10 @@ from rich.text import Text
 from arescode.providers.base import ModelProvider, WireMessage
 from arescode.tools.registry import Action, ToolResult, action_summary
 
+# Lines of tool output shown inline when not in /verbose mode. Enough to see a short file
+# list or the head of a read, without flooding the trace; /verbose shows everything.
+PREVIEW_LINES = 12
+
 
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
     console.print(f"[bold]AresCode[/bold]  model=[cyan]{model}[/cyan]  num_ctx={num_ctx}")
@@ -92,6 +96,25 @@ class ConsoleObserver:
             self._render_diff(result.diff)
         elif self.verbose and result.output:
             self.console.print(Text(result.output, style="dim"))
+        elif result.output:  # non-verbose: a short preview so the result is visible on screen
+            self._render_preview(result.output)
+
+    def _render_preview(self, output: str) -> None:
+        """Show the first few lines of a tool result so the user sees what the model saw.
+
+        Without this, a read-only tool prints only its one-line summary and the actual result
+        (the file list, the matches) reaches the model but never the screen — so the model's
+        prose ("I listed the files") is the only trace of data the user never saw. Full output
+        stays behind /verbose.
+        """
+        lines = output.splitlines()
+        for line in lines[:PREVIEW_LINES]:
+            self.console.print(Text("  " + line, style="dim"))
+        hidden = len(lines) - PREVIEW_LINES
+        if hidden > 0:
+            self.console.print(
+                Text(f"  ... +{hidden} more line(s) - /verbose for all", style="dim")
+            )
 
     def _render_diff(self, diff: str) -> None:
         for line in diff.splitlines():
