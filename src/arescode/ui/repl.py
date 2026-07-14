@@ -22,9 +22,11 @@ from arescode.config import Config
 from arescode.core.context import load_system_prompt
 from arescode.core.loop import run_turn
 from arescode.core.state import SessionState
+from arescode.permissions.gate import Gate
 from arescode.providers.openai_compat import OpenAICompatProvider
 from arescode.tools.registry import Executor
 from arescode.ui import render
+from arescode.ui.approve import auto_approver, interactive_approver
 
 HELP_TEXT = """\
 Commands:
@@ -33,6 +35,8 @@ Commands:
   /model <name>    switch the active model (no arg shows the current one)
   /verbose         toggle full tool output in the trace
   /stats           show edit telemetry for this session
+  /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
+  /deny <cmd>      remove a bash command from the session allowlist
   /exit, /quit     leave AresCode
 Input:
   Enter            send the message
@@ -50,6 +54,9 @@ class Command:
     model: str | None = None  # set when /model switches the active model
     toggle_verbose: bool = False  # set when /verbose is issued
     show_stats: bool = False  # set when /stats is issued
+    show_allow: bool = False  # set when /allow is issued with no argument
+    allow: str | None = None  # bash token to add to the session allowlist (/allow <cmd>)
+    deny: str | None = None  # bash token to drop from the session allowlist (/deny <cmd>)
 
 
 def parse_command(line: str, state: SessionState, console: Console) -> Command:
@@ -71,6 +78,15 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         return Command(action="continue", toggle_verbose=True)
     if name == "/stats":
         return Command(action="continue", show_stats=True)
+    if name == "/allow":
+        if not arg:
+            return Command(action="continue", show_allow=True)
+        return Command(action="continue", allow=arg.split()[0])
+    if name == "/deny":
+        if not arg:
+            render.note(console, "usage: /deny <command>")
+            return Command(action="continue")
+        return Command(action="continue", deny=arg.split()[0])
     if name == "/model":
         if not arg:
             render.note(console, f"current model: {state.model}")
@@ -124,16 +140,25 @@ def _load_session(
     return state
 
 
-async def run(*, config: Config, project_dir: Path, resume: bool = False) -> None:
+async def run(
+    *, config: Config, project_dir: Path, resume: bool = False, yolo: bool = False
+) -> None:
     """Run the interactive agent loop until the user exits."""
     console = Console()
     provider = OpenAICompatProvider.from_config(config)
-    executor = Executor(project_dir, config)
+    gate = Gate.from_config(project_dir, config)
+    approver = auto_approver(console) if yolo else interactive_approver(console)
+    executor = Executor(project_dir, config, gate=gate, approver=approver)
     observer = render.ConsoleObserver(console, verbose=False)
     system_prompt = load_system_prompt()
     state = _load_session(project_dir, config, console, resume=resume)
 
     render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
+    if yolo:
+        console.print(
+            "[bold red]--yolo: every action auto-approved. "
+            "Hard-denied commands and path escapes are still blocked.[/bold red]"
+        )
 
     prompt_session: PromptSession = PromptSession(
         history=FileHistory(str(_history_path())),
@@ -165,6 +190,18 @@ async def run(*, config: Config, project_dir: Path, resume: bool = False) -> Non
                 render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
             if command.show_stats:
                 render.note(console, executor.stats.summary())
+            if command.show_allow:
+                render.note(console, gate.describe_allowlist())
+            if command.allow:
+                gate.allow_command(command.allow)
+                render.note(console, f"always allowing bash command: {command.allow}")
+            if command.deny:
+                removed = gate.deny_command(command.deny)
+                render.note(
+                    console,
+                    f"removed {command.deny} from the allowlist" if removed
+                    else f"{command.deny} was not in the session allowlist",
+                )
             continue
 
         task = asyncio.ensure_future(

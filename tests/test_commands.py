@@ -63,3 +63,25 @@ def test_verbose_command_toggles():
     command = parse_command("/verbose", state, _console())
     assert command.action == "continue"
     assert command.toggle_verbose is True
+
+
+def test_allow_without_arg_requests_listing():
+    command = parse_command("/allow", SessionState.new("m"), _console())
+    assert command.show_allow is True
+    assert command.allow is None
+
+
+def test_allow_with_token_sets_allow():
+    command = parse_command("/allow pytest -q", SessionState.new("m"), _console())
+    assert command.allow == "pytest"  # only the first token is allowlisted
+
+
+def test_deny_with_token_sets_deny():
+    command = parse_command("/deny pytest", SessionState.new("m"), _console())
+    assert command.deny == "pytest"
+
+
+def test_deny_without_arg_is_noop():
+    command = parse_command("/deny", SessionState.new("m"), _console())
+    assert command.action == "continue"
+    assert command.deny is None

@@ -38,6 +38,14 @@ class Config(BaseModel):
     num_ctx: int = Field(default=16384, gt=0, description="Context window size in tokens.")
     temperature: float = Field(default=0.1, ge=0.0, description="Sampling temperature.")
     max_steps: int = Field(default=25, gt=0, description="Hard cap on agent loop steps per turn.")
+    allow_commands: list[str] = Field(
+        default_factory=list,
+        description="bash first-tokens to auto-approve without asking (persistent allowlist).",
+    )
+    allow_paths: list[str] = Field(
+        default_factory=list,
+        description="file paths to auto-approve for write/edit (persistent allowlist).",
+    )
     request_timeout: float = Field(
         default=120.0, gt=0, description="Per-model-call timeout in seconds."
     )

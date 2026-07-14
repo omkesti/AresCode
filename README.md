@@ -9,17 +9,17 @@ See [`docs/context.md`](docs/context.md) for the full architecture and
 
 ## Status
 
-Early development. **Phase 3 (Edit) complete:** the agent now edits code — SEARCH/REPLACE with
-an exact→whitespace→fuzzy matching cascade, whole-file fallback, a syntax guard, colored diffs,
-and edit telemetry (`/stats`) — on top of Phase 2 (tools + loop), Phase 1 (streaming REPL,
-sessions), and Phase 0 (package, config, CI).
+Early development. **Phase 4 (Trust) complete:** a deny-first **permission gate** now guards every
+action — reads auto-allow, writes/edits and shell prompt for a single-keystroke `y/n/a` (with a
+change preview), and path escapes outside the project root plus a command blocklist (`sudo`,
+`rm -rf /`, `curl … | sh`, force-push, `.env`/`~/.ssh` exfiltration) are hard-denied and
+unoverridable by the model. This sits on top of Phase 3 (SEARCH/REPLACE edit cascade + whole-file
+fallback + telemetry), Phase 2 (tools + loop), Phase 1 (streaming REPL, sessions), and Phase 0
+(package, config, CI).
 
-Run `arescode` and ask it to fix a test or add a function; `arescode --resume` continues your
-last session.
-
-> **Heads-up:** Phase 3 applies edits directly (showing a diff). The permission gate and
-> approvals arrive in Phase 4 — until then, run it on a repo with a clean git working tree so
-> changes are easy to review and revert.
+Run `arescode` and ask it to fix a test or add a function; approve the writes it proposes.
+`arescode --resume` continues your last session; `arescode --yolo` auto-approves every action
+(hard denials still apply).
 
 ## Requirements
 

@@ -3,7 +3,7 @@
 > A Claude Code–style terminal coding agent that runs entirely on local models via Ollama.
 > This document is the single source of truth for the project's goals, architecture, design decisions, and structure. Feed it to any AI assistant or new collaborator to get them fully up to speed.
 
-**Status:** Pre-development (architecture finalized)
+**Status:** Phases 0–4 complete (M1 Talk, M2 Act, M3 Edit, M4 Trust); Phase 5 (Endure) next
 **Name:** `AresCode`
 **Primary model target:** `qwen2.5-coder:7b` via Ollama
 **Author:** Om — solo project
@@ -193,6 +193,8 @@ Deny-first philosophy, per-action approval:
 - Session allowlist resets on exit; a persistent allowlist lives in project config.
 
 **Security note (relevant to Sentinia thinking):** tool results are untrusted input. A file or command output containing "ignore previous instructions" must never change gate behavior — the gate reads only the parsed action, never model prose. Prompt-injection hardening of the system prompt is a post-MVP work item.
+
+**As built (Phase 4).** `Gate.check(action) -> Verdict{ALLOW | ASK | DENY}` is a pure function of parsed action fields; it is consulted at the **Executor boundary** (`Executor._check_permission`), not inline in `core/loop.py`, so the hand-written loop (D10) stays untouched — a DENY simply becomes a failed `ToolResult` the loop already reports to the model as a tool error. ASK verdicts are answered by an injected `Approver` (`ui/approve.py`); `interactive_approver` reads a single keystroke and `auto_approver` backs `--yolo`. Path containment uses `Path.resolve()` (realpath) against the resolved root; the command blocklist is a regex table (`DEFAULT_BLOCKLIST`). The session allowlist lives on the `Gate` (`/allow`, `/deny`, or an `a` answer); the persistent allowlist is the `allow_commands` / `allow_paths` config keys. The write/edit approval preview shows the *proposed* change (content or SEARCH·REPLACE blocks) — the colored post-apply diff is still produced by `tools/edit.py`.
 
 ### 4.7 Model provider (`providers/`)
 

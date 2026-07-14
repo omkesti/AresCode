@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from arescode.permissions.gate import Approver, Decision, Gate
 from arescode.tools.base import ToolError
 from arescode.tools.edit import EditStats, apply_edit, write_new_file
 from arescode.tools.files import read_file
@@ -140,23 +141,54 @@ _READONLY = (ReadFileAction, GrepAction, GlobAction)
 
 @dataclass(slots=True)
 class Executor:
-    """Dispatches an action to its tool implementation, within a fixed project dir."""
+    """Dispatches an action to its tool implementation, within a fixed project dir.
+
+    When a ``gate`` is supplied every action passes the permission gate before it runs: hard
+    denials become failed results the model sees as tool errors, and ASK verdicts are routed to
+    ``approver`` (the interactive prompt). With no gate (tests, headless runs) every action runs.
+    """
 
     project_dir: Path
     config: Config
     result_max_lines: int = field(default=200)
     stats: EditStats = field(default_factory=EditStats)
+    gate: Gate | None = None
+    approver: Approver | None = None
     _edit_failures: dict[str, int] = field(default_factory=dict)
 
     def is_readonly(self, action: Action) -> bool:
         return isinstance(action, _READONLY)
 
     def run(self, action: Action) -> ToolResult:
+        denied = self._check_permission(action)
+        if denied is not None:
+            return denied
         try:
             return self._dispatch(action)
         except ToolError as exc:
             return ToolResult(getattr(action, "tool", "unknown"), ok=False, output=str(exc),
                               summary="error")
+
+    def _check_permission(self, action: Action) -> ToolResult | None:
+        """Consult the gate; return a denial ToolResult, or None to proceed with the action."""
+        if self.gate is None:
+            return None
+        tool = getattr(action, "tool", "unknown")
+        verdict = self.gate.check(action)
+        if verdict.decision is Decision.ALLOW:
+            return None
+        if verdict.decision is Decision.DENY:
+            return ToolResult(tool, ok=False, output=f"permission denied: {verdict.reason}",
+                              summary="denied")
+        # ASK: hand off to the interactive approver (auto-deny if none is wired).
+        approval = self.approver(action, verdict) if self.approver is not None else None
+        if approval is not None and approval.approved:
+            if approval.remember:
+                self.gate.allow_always(verdict)
+            return None
+        return ToolResult(tool, ok=False,
+                          output="permission denied by the user; do not retry this action",
+                          summary="denied")
 
     def _dispatch(self, action: Action) -> ToolResult:
         if isinstance(action, ReadFileAction):

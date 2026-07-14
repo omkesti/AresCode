@@ -14,15 +14,19 @@ captures what actively shapes day-to-day work.
 
 ## Status
 
-- **Phase 0 (Foundation)** and **Phase 1 (Talk / milestone M1)** are complete and verified.
+- **Phases 0–4 are complete and verified** (M1 Talk, M2 Act, M3 Edit, M4 Trust).
 - Working today: layered config, the CLI entry point, an OpenAI-compatible **streaming provider**
-  over Ollama, an interactive **REPL** (slash commands, live markdown), and **session save/resume**.
-- **Next is Phase 2 (Act)** — which begins the hand-written work (see "Rules" below).
+  over Ollama, an interactive **REPL** (slash commands, live markdown), **session save/resume**,
+  the **lenient parser + read-only tools + master loop**, the **SEARCH/REPLACE edit cascade**
+  (retry + whole-file fallback + telemetry), and the **deny-first permission gate** (auto-allow
+  reads, ask-with-preview for writes/shell, hard-deny path escapes + a command blocklist, session
+  & persistent allowlists, `/allow` `/deny`, and `--yolo`).
+- **Next is Phase 5 (Endure)** — repo map, `ARES.md` memory, token-budget compaction.
 
-Implemented modules: `config.py`, `main.py`, `providers/base.py`, `providers/openai_compat.py`,
-`core/state.py`, `ui/repl.py`, `ui/render.py`. Everything else under `src/arescode/` is still a
-**docstring-only stub** awaiting its phase (`core/loop.py`, `core/parser.py`, `core/context.py`,
-`tools/*`, `permissions/gate.py`, `repo/repomap.py`).
+Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
+`core/loop.py`, `core/context.py` (system-prompt loader only), `tools/*`, `permissions/gate.py`,
+`ui/repl.py`, `ui/render.py`, `ui/approve.py`. Still a **docstring-only stub** awaiting its phase:
+`repo/repomap.py` (Phase 5); `core/context.py` gains repo map + compaction in Phase 5.
 
 ## Commands
 
@@ -105,8 +109,8 @@ supposed to live in the harness.
 
 ## Build order (`docs/TASKS.md`)
 
-M1 Talk ✓ → **M2 Act** (parser `[HAND]` + read-only tools + loop `[HAND]`) → M3 Edit
+M1 Talk ✓ → M2 Act ✓ (parser `[HAND]` + read-only tools + loop `[HAND]`) → M3 Edit ✓
 (SEARCH/REPLACE cascade `[HAND]` + retry + whole-file fallback; the make-or-break milestone) →
-M4 Trust (gate) → M5 Endure (compaction, ARES.md, repo map) → M6 Polish. Each phase ships usable
-and adds tests before its exit check; don't start the next phase until the current one passes on a
-real repo.
+M4 Trust ✓ (gate) → **M5 Endure** (compaction, ARES.md, repo map) → M6 Polish. Each phase ships
+usable and adds tests before its exit check; don't start the next phase until the current one
+passes on a real repo.

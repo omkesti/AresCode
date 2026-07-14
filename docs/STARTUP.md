@@ -4,10 +4,11 @@ Every command needed to set up, run, test, and verify the project, in the order 
 normally use them. Commands are given for **Windows PowerShell** (primary) with a
 **macOS/Linux (bash)** equivalent underneath where they differ.
 
-> Current stage: **Phase 3 (Edit)**. `arescode` now edits code too — SEARCH/REPLACE with a
-> matching cascade, whole-file fallback, colored diffs, and edit telemetry (`/stats`). Edits
-> apply directly (a diff is shown); the permission gate lands in Phase 4, so for now run it on a
-> repo with a clean git working tree.
+> Current stage: **Phase 4 (Trust)**. A deny-first **permission gate** now guards every action:
+> reads auto-allow, writes/edits and shell prompt for a single-keystroke `y/n/a` (with a change
+> preview), and path escapes plus a command blocklist are hard-denied. Session choices can be
+> remembered (`a`, or `/allow`); `--yolo` auto-approves. This is on top of Phase 3's SEARCH/REPLACE
+> edit cascade, whole-file fallback, colored diffs, and edit telemetry (`/stats`).
 > See [`TASKS.md`](TASKS.md) for the roadmap and [`context.md`](context.md) for architecture.
 
 ---
@@ -122,6 +123,7 @@ Flag overrides and resume:
 ```powershell
 arescode --model qwen2.5-coder:7b --ctx 16384   # override model / context window
 arescode --resume                               # continue the most recent session
+arescode --yolo                                 # auto-approve every action (hard denials still apply)
 ```
 
 This opens the interactive REPL. Type a message and press **Enter** to send
@@ -134,7 +136,13 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 | `/model <name>` | switch the active model |
 | `/verbose` | toggle full tool output in the trace |
 | `/stats` | show edit telemetry for the session |
+| `/allow [cmd]` | no arg: show the allowlist; with a token: always allow that bash command |
+| `/deny <cmd>` | remove a bash command from the session allowlist |
 | `/exit`, `/quit` | leave (or press **Ctrl+D**) |
+
+When the agent proposes a write, edit, or shell command, the gate prompts with a preview:
+press **y** (once), **n** (decline), or **a** (always — remember this file or command for the
+session). Path escapes outside the project root and blocklisted commands are refused outright.
 
 **Ctrl+C** cancels the current response without ending the session. Sessions autosave to
 `.arescode/sessions/<timestamp>.json` after each reply.
@@ -194,6 +202,11 @@ temperature = 0.1
 max_steps = 25
 request_timeout = 120.0
 bash_timeout = 60.0
+
+# Persistent permission allowlists (Phase 4). Bash first-tokens and file paths listed here are
+# auto-approved without prompting, in every session for this project.
+allow_commands = ["pytest", "ls", "git"]
+allow_paths = []
 ```
 
 Unknown keys are rejected (a typo fails loudly rather than being ignored).

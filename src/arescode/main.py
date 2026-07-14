@@ -44,6 +44,9 @@ def start(
         None, "--ctx", help="Override the context window size (num_ctx)."
     ),
     resume: bool = typer.Option(False, "--resume", help="Resume the most recent session."),
+    yolo: bool = typer.Option(
+        False, "--yolo", help="Auto-approve every action (dangerous; hard denials still apply)."
+    ),
 ) -> None:
     """Launch the agent REPL in the current directory."""
     project_dir = Path.cwd()
@@ -54,7 +57,7 @@ def start(
     # Imported lazily so `--help` and startup stay fast and don't pull in the UI stack.
     from arescode.ui.repl import run
 
-    asyncio.run(run(config=config, project_dir=project_dir, resume=resume))
+    asyncio.run(run(config=config, project_dir=project_dir, resume=resume, yolo=yolo))
 
 
 def main() -> None:
