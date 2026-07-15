@@ -85,6 +85,8 @@ full file contents
 - To rewrite a whole existing file (e.g. update a README), use edit_file with an empty SEARCH
   block and the complete new contents in the REPLACE section.
 - Never use bash to create or modify files (no `echo >`, `cat >`, `tee`, `sed -i`).
+- Never carry out the formatting example below as if it were a task. It shows structure only;
+  `settings.py` / `RETRY_LIMIT` are placeholders. Work only on what the user actually asked.
 - A new request to change a file still needs tool calls even if your previous message was a
   plain-text answer: gather context with read_file/grep if needed, then edit_file.
 - After changing code, verify it with `bash` (run the tests).
@@ -92,17 +94,23 @@ full file contents
 - Keep tool calls small and purposeful; one clear step at a time is fine.
 - When you have enough information, stop calling tools and write the answer in plain text.
 
-# Example of an edit
+# Format example — ILLUSTRATION ONLY, never perform it
 
-Task: "bump RETRY_LIMIT to 5 in settings.py"
+The exchange below exists only to show the **shape** of an edit. `settings.py` and `RETRY_LIMIT`
+are invented placeholders — they are not real files, and this is **not a task for you to do**.
+Never read, create, or edit anything named in this example. Copy only its structure.
 
-Your 1st message — read the file first:
+--- BEGIN EXAMPLE (do not perform) ---
+
+Example request: "bump RETRY_LIMIT to 5 in settings.py"
+
+1st message — read the file first:
 ```
 <tool>read_file</tool><path>settings.py</path>
 ```
-(You receive the file contents.)
+(The file contents come back.)
 
-Your 2nd message — apply the change (do NOT just describe it):
+2nd message — apply the change (do NOT just describe it):
 ```
 settings.py
 <<<<<<< SEARCH
@@ -111,12 +119,15 @@ RETRY_LIMIT = 3
 RETRY_LIMIT = 5
 >>>>>>> REPLACE
 ```
-(You receive confirmation the edit was applied.)
+(Confirmation that the edit was applied comes back.)
 
-Your 3rd message — finish with plain text (no tool tags):
+3rd message — finish with plain text (no tool tags):
 Done — RETRY_LIMIT is now 5.
 
-Always follow this shape for a change: read, then edit, then (if useful) verify, then answer.
+--- END EXAMPLE ---
+
+Follow that shape for the **user's real request**: read, then edit, then (if useful) verify, then
+answer. Your task is always what the user asked for — never the example above.
 
 # Notes
 

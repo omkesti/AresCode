@@ -47,13 +47,23 @@ DUPLICATE_NUDGE = (
 # How many times an identical action may run within one turn before it's treated as a loop.
 REPEAT_LIMIT = 2
 
+# Re-states the user's own request: without it a confused model will latch onto the nearest
+# task-shaped text it can see — including the formatting example in the system prompt.
 UNSAVED_FILE_NUDGE = (
-    "You have not applied the requested change to any file yet — nothing has changed on disk. If a "
-    "file needs to change, do it now with a tool: edit_file for an existing file (a SEARCH/REPLACE "
-    "block, or an empty-SEARCH block with the full new contents) or write_file for a new file. Do "
-    "not just describe or paste the change, and never write files with bash (echo >, cat >, tee, "
+    "You have not applied any change to a file yet — nothing has changed on disk.\n"
+    "The request you are working on is, exactly: {request}\n"
+    "If a file needs to change, do it now with a tool: edit_file for an existing file (a "
+    "SEARCH/REPLACE block, or an empty-SEARCH block with the full new contents) or write_file for "
+    "a new file. Work only on that request — never carry out the example from your instructions. "
+    "Do not paste the change as text, and never write files with bash (echo >, cat >, tee, "
     "sed -i). If no change is actually needed, say so plainly."
 )
+
+
+def _short(text: str, limit: int = 300) -> str:
+    """Collapse a request to one line for quoting back to the model."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[:limit] + "..."
 
 # Verbs that signal the user wants a file created or changed — used to catch a model that
 # describes/pastes a change instead of applying it with a tool (a weak-model failure that gets
@@ -177,7 +187,7 @@ async def run_turn(
             if wants_change and not wrote_file and not nudged_unsaved:
                 nudged_unsaved = True
                 obs.notice("no change applied yet — asking the model to make the edit")
-                state.append("user", UNSAVED_FILE_NUDGE)
+                state.append("user", UNSAVED_FILE_NUDGE.format(request=_short(user_msg)))
                 continue
             obs.final(text)
             return text

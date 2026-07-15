@@ -146,6 +146,25 @@ async def test_loop_nudges_when_file_content_not_saved():
     assert any("no change applied" in n for n in obs.notices)
 
 
+async def test_nudge_restates_the_original_request():
+    # Guard: the nudge must quote the user's actual request. Without it a confused model latches
+    # onto the nearest task-shaped text — e.g. the formatting example in the system prompt.
+    provider = ScriptedProvider([
+        "I would update it like this:\n```\nnew content\n```",  # no tool -> triggers the nudge
+        "Done.",
+    ])
+    state = SessionState.new("m")
+    await run_turn(
+        "Please update README.md to describe the project",
+        state=state, provider=provider, executor=FakeExecutor(),
+        system_prompt="sys", max_steps=5,
+    )
+    nudges = [m.content for m in state.messages if "not applied any change" in m.content]
+    assert nudges, "expected the loop to nudge"
+    assert "update README.md to describe the project" in nudges[0]
+    assert "never carry out the example" in nudges[0]
+
+
 async def test_loop_does_not_nudge_a_pure_question():
     # A question that just happens to include a code fence must not trigger the write nudge.
     provider = ScriptedProvider(["Here is how it works:\n```\nsome code\n```"])
