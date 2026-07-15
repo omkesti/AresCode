@@ -69,6 +69,33 @@ def test_unknown_config_key_is_rejected(tmp_path):
         load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
 
 
+# --- per-model config (D12) ------------------------------------------------
+
+
+def test_per_model_sections_load_and_resolve(tmp_path):
+    (tmp_path / ".arescode.toml").write_text(
+        "num_ctx = 16384\n"
+        "temperature = 0.1\n"
+        '[models."qwen2.5-coder:7b"]\n'
+        "num_ctx = 16384\n"
+        '[models."qwen2.5-coder:14b-instruct"]\n'
+        "num_ctx = 8192\n"
+    )
+    cfg = load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
+    assert cfg.settings_for("qwen2.5-coder:14b-instruct") == (8192, 0.1)
+    assert cfg.settings_for("qwen2.5-coder:7b") == (16384, 0.1)
+    # A model with no section inherits the top-level defaults.
+    assert cfg.settings_for("mistral:latest") == (16384, 0.1)
+
+
+def test_unknown_key_in_model_section_is_rejected(tmp_path):
+    (tmp_path / ".arescode.toml").write_text(
+        '[models."qwen2.5-coder:7b"]\nbogus = 1\n'
+    )
+    with pytest.raises(ValidationError):
+        load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
+
+
 def test_migrate_legacy_project_paths(tmp_path):
     """Old per-project .agentcli.toml and .agentcli/sessions are copied to the arescode paths."""
     (tmp_path / ".agentcli.toml").write_text('model = "from-legacy"\n')

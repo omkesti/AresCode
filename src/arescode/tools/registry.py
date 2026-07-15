@@ -148,14 +148,45 @@ class Executor:
     path escape can never execute, regardless of caller. ASK verdicts pass straight through —
     their approval already happened in the loop before ``run`` was called. With no gate (tests,
     headless runs) every action runs.
+
+    Edit telemetry is kept **per model** (``stats_by_model``, keyed by ``active_model``) so a
+    mid-session model switch attributes each edit to the model that produced it (D12); ``stats``
+    exposes the rolled-up total for callers that want one number.
     """
 
     project_dir: Path
     config: Config
     result_max_lines: int = field(default=200)
-    stats: EditStats = field(default_factory=EditStats)
     gate: Gate | None = None
+    active_model: str = ""  # tags the model that produced each edit; set by ModelManager on switch
+    stats_by_model: dict[str, EditStats] = field(default_factory=dict)
     _edit_failures: dict[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.active_model:
+            self.active_model = self.config.model
+
+    @property
+    def stats(self) -> EditStats:
+        """Aggregate edit telemetry across every model used this session."""
+        return _aggregate_stats(self.stats_by_model)
+
+    def _stats_for(self, model: str) -> EditStats:
+        stats = self.stats_by_model.get(model)
+        if stats is None:
+            stats = EditStats()
+            self.stats_by_model[model] = stats
+        return stats
+
+    def stats_report(self) -> str:
+        """Edit telemetry grouped by model (with a total when more than one model was used)."""
+        if not self.stats_by_model:
+            return "edits: none this session"
+        lines = [f"[{model}] {self.stats_by_model[model].summary()}"
+                 for model in sorted(self.stats_by_model)]
+        if len(self.stats_by_model) > 1:
+            lines.append(f"[all] {self.stats.summary()}")
+        return "\n".join(lines)
 
     def is_readonly(self, action: Action) -> bool:
         return isinstance(action, _READONLY)
@@ -205,7 +236,8 @@ class Executor:
         if isinstance(action, EditFileAction):
             prior = self._edit_failures.get(action.path, 0)
             res = apply_edit(
-                self.project_dir, action.path, action.edits, self.stats, prior_failures=prior
+                self.project_dir, action.path, action.edits,
+                self._stats_for(self.active_model), prior_failures=prior,
             )
             self._edit_failures[action.path] = 0 if res.ok else prior + 1
             summary = res.tier or ("ok" if res.ok else "no match")
@@ -225,3 +257,17 @@ class Executor:
 def _count_lines(text: str) -> str:
     n = len(text.splitlines())
     return f"{n} line(s)"
+
+
+def _aggregate_stats(by_model: dict[str, EditStats]) -> EditStats:
+    """Sum per-model :class:`EditStats` into one total (for the session-wide view)."""
+    total = EditStats()
+    for stats in by_model.values():
+        total.attempts += stats.attempts
+        total.exact += stats.exact
+        total.whitespace += stats.whitespace
+        total.fuzzy += stats.fuzzy
+        total.whole_file += stats.whole_file
+        total.failures += stats.failures
+        total.fallbacks += stats.fallbacks
+    return total

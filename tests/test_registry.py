@@ -81,3 +81,29 @@ def _ok_result():
     from arescode.tools.registry import ToolResult
 
     return ToolResult("read_file", True, "contents", summary="1 line(s)")
+
+
+# --- per-model edit telemetry (D12) ----------------------------------------
+
+
+def test_edit_telemetry_is_tagged_per_active_model(tmp_path):
+    (tmp_path / "m.py").write_text("value = 1\n")
+    ex = Executor(tmp_path, Config())
+    ex.active_model = "model-a"
+    assert ex.run(EditFileAction("m.py", (SearchReplace("value = 1", "value = 2"),))).ok
+
+    ex.active_model = "model-b"
+    assert ex.run(EditFileAction("m.py", (SearchReplace("value = 2", "value = 3"),))).ok
+
+    # Each edit is attributed to the model that was active when it ran.
+    assert ex.stats_by_model["model-a"].exact == 1
+    assert ex.stats_by_model["model-b"].exact == 1
+    # The rolled-up total still reflects both.
+    assert ex.stats.exact == 2
+    report = ex.stats_report()
+    assert "[model-a]" in report and "[model-b]" in report and "[all]" in report
+
+
+def test_active_model_defaults_to_config_model(tmp_path):
+    ex = Executor(tmp_path, Config(model="from-config"))
+    assert ex.active_model == "from-config"

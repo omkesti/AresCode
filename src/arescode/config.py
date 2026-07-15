@@ -30,6 +30,20 @@ LEGACY_PROJECT_CONFIG_NAME = ".agentcli.toml"
 LEGACY_PROJECT_STATE_DIR = ".agentcli"  # old per-project dir that held sessions/
 
 
+class ModelSettings(BaseModel):
+    """Per-model overrides for a ``[models."<tag>"]`` section (D12).
+
+    Any field left unset falls back to the top-level default of the same name, so a section may
+    tune just ``num_ctx`` (the usual case — a big 14B needs a smaller KV cache on low VRAM) and
+    inherit the rest. Unknown keys are rejected so a typo fails loudly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    num_ctx: int | None = Field(default=None, gt=0, description="Context window for this model.")
+    temperature: float | None = Field(default=None, ge=0.0, description="Sampling temperature.")
+
+
 class Config(BaseModel):
     """Validated runtime configuration for a session."""
 
@@ -64,6 +78,30 @@ class Config(BaseModel):
     bash_timeout: float = Field(
         default=60.0, gt=0, description="Per-shell-command timeout in seconds."
     )
+    # Per-model overrides, keyed by Ollama tag (e.g. models."qwen2.5-coder:14b-instruct").
+    # A model with no section here uses the top-level num_ctx/temperature as its defaults (D12).
+    models: dict[str, ModelSettings] = Field(
+        default_factory=dict,
+        description="Per-model num_ctx/temperature overrides; unknown models use the defaults.",
+    )
+
+    def settings_for(self, model: str) -> tuple[int, float]:
+        """Resolve (num_ctx, temperature) for ``model``: its section, else top-level defaults."""
+        section = self.models.get(model)
+        num_ctx = section.num_ctx if section and section.num_ctx is not None else self.num_ctx
+        temp = (
+            section.temperature
+            if section and section.temperature is not None
+            else self.temperature
+        )
+        return num_ctx, temp
+
+    def for_model(self, model: str) -> Config:
+        """A copy of this config with ``model`` active and its per-model settings applied."""
+        num_ctx, temperature = self.settings_for(model)
+        return self.model_copy(
+            update={"model": model, "num_ctx": num_ctx, "temperature": temperature}
+        )
 
 
 def _read_toml(path: Path) -> dict[str, Any]:

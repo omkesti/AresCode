@@ -21,20 +21,23 @@ from rich.console import Console
 from arescode.config import Config
 from arescode.core.context import load_system_prompt
 from arescode.core.loop import run_turn
+from arescode.core.models import ModelManager, match_model
 from arescode.core.state import SessionState
 from arescode.permissions.gate import Gate
+from arescode.providers.ollama_admin import OllamaAdmin
 from arescode.providers.openai_compat import OpenAICompatProvider
 from arescode.tools.registry import Executor
 from arescode.ui import render
 from arescode.ui.approve import auto_approver, interactive_approver
+from arescode.ui.model_select import free_text_model, pick_model
 
 HELP_TEXT = """\
 Commands:
   /help            show this help
   /clear           reset the conversation history
-  /model <name>    switch the active model (no arg shows the current one)
+  /model [name]    no arg: pick from installed models; with a name: switch (unloads the old one)
   /verbose         toggle full tool output in the trace
-  /stats           show edit telemetry for this session
+  /stats           show edit telemetry for this session (grouped by model)
   /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
   /deny <cmd>      remove a bash command from the session allowlist
   /exit, /quit     leave AresCode
@@ -51,7 +54,8 @@ class Command:
     """The outcome of handling a /slash command."""
 
     action: Literal["continue", "exit"]
-    model: str | None = None  # set when /model switches the active model
+    model_pick: bool = False  # /model with no arg -> open the interactive picker
+    model_target: str | None = None  # /model <name> -> switch target (resolved by the REPL)
     toggle_verbose: bool = False  # set when /verbose is issued
     show_stats: bool = False  # set when /stats is issued
     show_allow: bool = False  # set when /allow is issued with no argument
@@ -88,12 +92,11 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
             return Command(action="continue")
         return Command(action="continue", deny=arg.split()[0])
     if name == "/model":
+        # The actual switch (validate -> unload -> warmup -> budget) is async and runs in the
+        # REPL; parse_command only signals intent. No arg opens the picker; a name is a target.
         if not arg:
-            render.note(console, f"current model: {state.model}")
-            return Command(action="continue")
-        state.model = arg
-        render.note(console, f"model switched to {arg}")
-        return Command(action="continue", model=arg)
+            return Command(action="continue", model_pick=True)
+        return Command(action="continue", model_target=arg)
 
     render.note(console, f"unknown command: {name} (try /help)")
     return Command(action="continue")
@@ -140,12 +143,97 @@ def _load_session(
     return state
 
 
+async def _activate_model(
+    manager: ModelManager,
+    state: SessionState,
+    base_config: Config,
+    console: Console,
+    *,
+    resume: bool,
+) -> Config:
+    """Resolve the config for the session's active model at startup (applies per-model settings).
+
+    On ``--resume`` the recorded model is restored; if it is no longer installed we warn and fall
+    back to the configured default (D12). Fresh sessions simply apply the default model's per-model
+    settings so the very first provider already uses the right num_ctx.
+    """
+    active = state.model or base_config.model
+    if resume:
+        names = await manager.installed_names()
+        if names is not None and active not in names:
+            render.note(
+                console,
+                f"session model '{active}' is no longer installed; "
+                f"falling back to {base_config.model}",
+            )
+            active = base_config.model
+    state.model = active
+    return manager.effective_config(active)
+
+
+async def _switch_model(
+    *,
+    manager: ModelManager,
+    state: SessionState,
+    config: Config,
+    provider: OpenAICompatProvider,
+    console: Console,
+    target: str | None,
+) -> tuple[Config, OpenAICompatProvider]:
+    """Handle a ``/model`` command: pick/resolve a target, run the switch, rebuild the provider.
+
+    Returns the (possibly unchanged) config + provider so the caller can keep serving chat from the
+    OpenAI-compat endpoint (D5) with the new model's settings.
+    """
+    installed = await manager.installed()
+    names = None if installed is None else [m.name for m in installed]
+
+    if target is None:  # /model with no arg -> picker (or free-text when admin is unavailable)
+        if installed is None:
+            render.note(console, "admin API unavailable — type a model name to switch")
+            target = await free_text_model(console)
+        else:
+            target = await pick_model(
+                console, installed, active=state.model, loaded=await manager.loaded_names()
+            )
+        if not target:
+            render.note(console, "model switch cancelled")
+            return config, provider
+
+    if names is not None:  # resolve a prefix / number-derived name against the installed list
+        matched = match_model(target, names)
+        if matched.model is None:
+            render.error(console, matched.error)
+            return config, provider
+        target = matched.model
+
+    if target == state.model:
+        render.note(console, f"already using {target}")
+        return config, provider
+
+    result = await manager.switch(
+        state, target, installed_names=names, on_progress=lambda s: render.note(console, s)
+    )
+    if not result.ok:
+        render.error(console, result.error)
+        return config, provider
+
+    for warning in result.warnings:
+        render.note(console, warning)
+    config = result.config
+    provider = OpenAICompatProvider.from_config(config)
+    console.print(
+        f"[bold cyan]{result.model}[/bold cyan]  num_ctx={result.num_ctx}  "
+        f"context {result.context_pct:.0f}% used"
+    )
+    return config, provider
+
+
 async def run(
     *, config: Config, project_dir: Path, resume: bool = False, yolo: bool = False
 ) -> None:
     """Run the interactive agent loop until the user exits."""
     console = Console()
-    provider = OpenAICompatProvider.from_config(config)
     gate = Gate.from_config(project_dir, config)
     approver = auto_approver(console) if yolo else interactive_approver(console)
     # The loop runs the interactive gate (allow/ask/approve); the executor shares the same gate as
@@ -154,6 +242,16 @@ async def run(
     observer = render.ConsoleObserver(console, verbose=False)
     system_prompt = load_system_prompt()
     state = _load_session(project_dir, config, console, resume=resume)
+
+    # Native admin client + switch lifecycle owner (D12). Isolated from the chat provider: the
+    # admin API is only ever reached through this manager, never from the OpenAI-compat path.
+    admin = OllamaAdmin.from_config(config)
+    manager = ModelManager(config, admin, executor=executor)
+
+    # Apply the active model's per-model settings (and restore/validate it on --resume).
+    config = await _activate_model(manager, state, config, console, resume=resume)
+    provider = OpenAICompatProvider.from_config(config)
+    executor.active_model = state.model
 
     render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
     if yolo:
@@ -184,14 +282,16 @@ async def run(
             command = parse_command(user_input, state, console)
             if command.action == "exit":
                 break
-            if command.model:
-                config = config.model_copy(update={"model": command.model})
-                provider = OpenAICompatProvider.from_config(config)
+            if command.model_pick or command.model_target is not None:
+                config, provider = await _switch_model(
+                    manager=manager, state=state, config=config, provider=provider,
+                    console=console, target=command.model_target,
+                )
             if command.toggle_verbose:
                 observer.verbose = not observer.verbose
                 render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
             if command.show_stats:
-                render.note(console, executor.stats.summary())
+                render.note(console, executor.stats_report())
             if command.show_allow:
                 render.note(console, gate.describe_allowlist())
             if command.allow:
@@ -219,6 +319,9 @@ async def run(
                 approver=approver,
             )
         )
+        # Block a model switch while a turn is in flight (context.md: REPL-idle only). Belt-and-
+        # suspenders: /model is handled between turns anyway, but this makes the guard explicit.
+        manager.busy = True
         try:
             await task
         except KeyboardInterrupt:  # Ctrl+C mid-turn: cancel, keep the session
@@ -228,9 +331,11 @@ async def run(
             except (asyncio.CancelledError, KeyboardInterrupt):
                 pass
             render.note(console, "cancelled")
+        finally:
+            manager.busy = False
 
         state.save(project_dir)
 
     if executor.stats.attempts:
-        render.note(console, executor.stats.summary())
+        render.note(console, executor.stats_report())
     render.note(console, "bye")

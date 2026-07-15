@@ -136,9 +136,9 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 |---|---|
 | `/help` | list commands |
 | `/clear` | reset the conversation history |
-| `/model <name>` | switch the active model |
+| `/model [name]` | no arg: pick from installed models; with a name: switch (unloads the old model from VRAM first) |
 | `/verbose` | toggle full tool output in the trace |
-| `/stats` | show edit telemetry for the session |
+| `/stats` | show edit telemetry for the session (grouped by model) |
 | `/allow [cmd]` | no arg: show the allowlist; with a token: always allow that bash command |
 | `/deny <cmd>` | remove a bash command from the session allowlist |
 | `/exit`, `/quit` | leave (or press **Ctrl+D**) |
@@ -202,7 +202,7 @@ Example `./.arescode.toml`:
 model = "qwen2.5-coder:14b-instruct"
 # model = "qwen2.5-coder:7b"        # faster, weaker fallback for low-VRAM machines
 base_url = "http://localhost:11434/v1"
-num_ctx = 16384                     # 14B Q4 ≈ 9GB; KV cache grows with num_ctx — drop to 8192 if slow
+num_ctx = 16384                     # default window; 14B Q4 ≈ 9GB, KV cache grows with num_ctx
 temperature = 0.1
 max_steps = 25
 request_timeout = 120.0
@@ -212,9 +212,21 @@ bash_timeout = 60.0
 # auto-approved without prompting, in every session for this project.
 allow_commands = ["pytest", "ls", "git"]
 allow_paths = []
+
+# Per-model settings (D12). Switch between these at runtime with /model; the previous model is
+# unloaded from VRAM before the next one loads. A model with no section here uses the num_ctx /
+# temperature above as its defaults.
+[models."qwen2.5-coder:7b"]
+num_ctx = 16384                     # ≈4.7GB Q4: weights + KV cache fit VRAM, use the fuller window
+temperature = 0.1
+
+[models."qwen2.5-coder:14b-instruct"]
+num_ctx = 8192                      # ≈9GB Q4: on a <12GB GPU weights spill to CPU — keep the KV cache small
+temperature = 0.1
 ```
 
-Unknown keys are rejected (a typo fails loudly rather than being ignored).
+Unknown keys are rejected (a typo fails loudly rather than being ignored) — including inside a
+`[models."…"]` section.
 
 ---
 

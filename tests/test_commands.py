@@ -29,17 +29,21 @@ def test_clear_empties_history():
     assert state.messages == []
 
 
-def test_model_switch_updates_state():
+def test_model_with_name_sets_target():
+    # parse_command only signals intent now; the async switch (validate/unload/warmup) runs in the
+    # REPL, so state.model is unchanged here and the target is carried on the command.
     state = SessionState.new("m")
     command = parse_command("/model llama3", state, _console())
-    assert command.model == "llama3"
-    assert state.model == "llama3"
+    assert command.model_target == "llama3"
+    assert command.model_pick is False
+    assert state.model == "m"  # not mutated until the switch actually completes
 
 
-def test_model_without_arg_reports_current():
+def test_model_without_arg_requests_picker():
     state = SessionState.new("m")
     command = parse_command("/model", state, _console())
-    assert command.model is None
+    assert command.model_pick is True
+    assert command.model_target is None
     assert command.action == "continue"
     assert state.model == "m"
 

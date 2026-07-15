@@ -27,8 +27,9 @@ A CLI tool that works like Claude Code but is powered by locally installed model
 4. Permission gate (auto-allow reads, confirm writes/shell with diff previews)
 5. Context management: repo map, `ARES.md` project memory, token-budget compaction
 6. Session persistence (save/resume conversation state)
+7. Mid-session model switching (`/model`) with safe VRAM hot-swapping — pick from installed models, the previous one is explicitly unloaded before the new one loads, with per-model settings (D12)
 
-**Explicitly deferred (post-MVP):** sub-agents, MCP support, TODO planner, tree-sitter symbol maps, multi-model routing, IDE integration, hooks, custom slash commands.
+**Explicitly deferred (post-MVP):** sub-agents, MCP support, TODO planner, tree-sitter symbol maps, *automatic* multi-model routing (per-task model selection — distinct from the manual `/model` switch above), IDE integration, hooks, custom slash commands.
 
 ---
 
@@ -210,6 +211,32 @@ Deny-first philosophy, per-action approval:
 - `temperature`: 0.0–0.2 for agentic work.
 - `keep_alive`: set generously (e.g. `30m`) so the model isn't reloaded between turns.
 
+**Multi-model switching and per-model `num_ctx` (D12).** The user can switch the active model
+mid-session with `/model` (no arg → interactive picker over installed models; `/model <name>` →
+direct switch with prefix-matching). Because a sub-12GB GPU can only hold one model at a time, the
+switch enforces **exclusive residency**: the current model is unloaded from VRAM *before* the target
+is warmed. This uses Ollama's **native `/api/*` endpoints**, which the OpenAI-compat surface does not
+expose — so a small dedicated admin client (`providers/ollama_admin.py`) owns exactly four calls
+(`/api/tags`, `/api/ps`, and `/api/generate` for unload/warmup) and is **strictly isolated from the
+chat provider** (the chat path stays on `/v1/chat/completions`, preserving D5). If the backend is not
+Ollama, the admin calls 404 and the feature degrades gracefully to a name-only switch. The switch
+lifecycle (validate → block-if-mid-turn → unload → warmup → update state → recompute budget →
+compact if the window shrank) lives in `core/models.py` (`ModelManager`).
+
+Each model carries its own `num_ctx`/`temperature` via `[models."<tag>"]` config sections; a model
+with no section inherits the top-level defaults:
+
+| Model | `num_ctx` | Rationale |
+|---|---|---|
+| `qwen2.5-coder:7b` (≈4.7GB Q4) | 16384 | Weights + KV cache fit VRAM comfortably; use the fuller window. |
+| `qwen2.5-coder:14b-instruct` (≈9GB Q4) | 8192 | On a <12GB GPU the weights already spill to CPU; a smaller KV cache keeps generation from crawling. |
+| any other tag | top-level default | Falls back to the `num_ctx`/`temperature` defaults in the config root. |
+
+On a switch the token budget is recomputed for the new window; if the history no longer fits a
+*smaller* window it is compacted immediately (Phase 5 summarization once built — TASKS 5.4; until
+then a visible hard-truncation of the oldest turns). Edit telemetry (§4.3 / TASKS 3.6) is tagged
+with the model that produced each edit, so `/stats` groups by model.
+
 ### 4.8 System prompt (`prompts/system.md`)
 
 Versioned in the repo, never hardcoded in Python. Contents: role definition, the action protocol spec with 2–3 few-shot examples per tool, the SEARCH/REPLACE rules, "read before you edit" and "run tests after edits" behavioral rules, the repo map, and ARES.md contents. Keep the static portion under ~2,000 tokens — every token here is paid every single model call.
@@ -307,6 +334,7 @@ Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n
 | D9 | Python | TypeScript + Ink | Iteration speed for a solo dev; TS remains the "if rewriting" option |
 | D10 | Hand-write `loop.py` + `parser.py` first, no AI codegen | Full AI-assisted build | Explicit skill-building goal: these ~300 lines are the soul of the project |
 | D11 | Upgrade default model to `qwen2.5-coder:14b-instruct`; harness unchanged; re-baseline edit telemetry | Stay on 7B; or drop harness weight now that the model is stronger | Stronger instruction-following at a modest VRAM cost, with zero harness changes (robustness ≠ 7B workaround); 7B edit-success baselines are now stale and must be re-measured |
+| D12 | Mid-session multi-model switching with a **native admin API** (`ollama_admin.py`) kept isolated from the chat provider; exclusive VRAM residency (unload-before-load); per-model `num_ctx`/`temperature` | Automatic per-task routing; keeping only one model per process (restart to switch); driving unload through the chat provider | A 6GB GPU can hold one model at a time, so a hot-swap must evict the old one first — an Ollama-native operation the OpenAI-compat surface can't do. Isolating it preserves D5 portability (chat stays on `/v1`); admin 404s degrade to a name-only switch. Manual `/model` only — *automatic routing* stays deferred |
 
 ---
 
