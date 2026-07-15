@@ -128,6 +128,24 @@ def _format_matches(lines: list[str], max_matches: int) -> tuple[str, int]:
     return out, count
 
 
+def _normalize_glob_pattern(pattern: str) -> str:
+    """Coerce a model-supplied glob into a project-root-relative POSIX pattern.
+
+    Weaker models routinely anchor patterns (``/docs/*.md``), prefix a drive (``C:/docs``),
+    use OS separators (``docs\\*.md``), or lead with ``./``. Paths are relative to the project
+    root by contract (see prompts/system.md), and ``Path.glob`` raises ``NotImplementedError``
+    on an anchored pattern — so we strip the anchor and let the glob run inside the root rather
+    than crash. This also confines the search to the project (an absolute pattern can't escape).
+    """
+    pat = pattern.strip().replace("\\", "/")
+    if len(pat) >= 2 and pat[1] == ":":  # drop a Windows drive like "C:/..."
+        pat = pat[2:]
+    pat = pat.lstrip("/")  # anchored -> relative to the project root
+    while pat.startswith("./"):
+        pat = pat[2:]
+    return pat or "*"
+
+
 def glob_files(
     project_dir: Path,
     pattern: str,
@@ -137,8 +155,15 @@ def glob_files(
 ) -> tuple[str, int]:
     """List files matching a glob ``pattern`` (e.g. ``**/*.py``), gitignore-filtered."""
     spec = _load_gitignore(project_dir)
+    normalized = _normalize_glob_pattern(pattern)
     results: list[str] = []
-    for path in project_dir.glob(pattern):
+    try:
+        matched = list(project_dir.glob(normalized))
+    except (NotImplementedError, ValueError) as exc:
+        # A pattern pathlib still refuses (e.g. empty or otherwise malformed): report it back to
+        # the model as a tool error so it can retry, rather than crashing the agent loop.
+        raise ToolError(f"invalid glob pattern {pattern!r}: {exc}") from exc
+    for path in matched:
         if not path.is_file():
             continue
         rel = path.relative_to(project_dir)
