@@ -15,6 +15,7 @@ Claude Code under the author's explicit authorization to modify ``[HAND]`` files
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
@@ -24,7 +25,15 @@ from arescode.core.parser import parse
 from arescode.core.state import SessionState
 from arescode.permissions.gate import Approval, Decision
 from arescode.providers.base import ModelProvider, ProviderError
-from arescode.tools.registry import Action, Executor, ToolResult, action_summary, format_observation
+from arescode.tools.registry import (
+    Action,
+    EditFileAction,
+    Executor,
+    ToolResult,
+    WriteFileAction,
+    action_summary,
+    format_observation,
+)
 
 if TYPE_CHECKING:
     from arescode.permissions.gate import Approver, Gate
@@ -37,6 +46,27 @@ DUPLICATE_NUDGE = (
 
 # How many times an identical action may run within one turn before it's treated as a loop.
 REPEAT_LIMIT = 2
+
+UNSAVED_FILE_NUDGE = (
+    "You have not applied the requested change to any file yet — nothing has changed on disk. If a "
+    "file needs to change, do it now with a tool: edit_file for an existing file (a SEARCH/REPLACE "
+    "block, or an empty-SEARCH block with the full new contents) or write_file for a new file. Do "
+    "not just describe or paste the change, and never write files with bash (echo >, cat >, tee, "
+    "sed -i). If no change is actually needed, say so plainly."
+)
+
+# Verbs that signal the user wants a file created or changed — used to catch a model that
+# describes/pastes a change instead of applying it with a tool (a weak-model failure that gets
+# worse after a conversational turn).
+_CHANGE_INTENT = re.compile(
+    r"\b(updat|creat|writ|edit|renam|rewrit|refactor|implement|modif|replace|add|fix|chang|"
+    r"append|insert|generat)\w*",
+    re.IGNORECASE,
+)
+
+
+def _wants_file_change(user_msg: str) -> bool:
+    return bool(_CHANGE_INTENT.search(user_msg))
 
 
 class LoopObserver(Protocol):
@@ -120,6 +150,9 @@ async def run_turn(
     state.user(user_msg)
     last_action: Action | None = None
     executed: dict[Action, int] = {}  # per-turn execution counts, for cycle detection
+    wants_change = _wants_file_change(user_msg)
+    wrote_file = False
+    nudged_unsaved = False
 
     for _ in range(max_steps):
         if should_interrupt():
@@ -138,6 +171,14 @@ async def run_turn(
         result = parse(text)
 
         if not result.actions:  # plain text -> the turn is done
+            # Safety net: the user asked to change a file, but the model ended its turn without
+            # ever applying it (it described or pasted the change, or drifted into exploration).
+            # Nudge it once to actually make the edit.
+            if wants_change and not wrote_file and not nudged_unsaved:
+                nudged_unsaved = True
+                obs.notice("no change applied yet — asking the model to make the edit")
+                state.append("user", UNSAVED_FILE_NUDGE)
+                continue
             obs.final(text)
             return text
 
@@ -165,6 +206,8 @@ async def run_turn(
             duration = time.perf_counter() - started
             obs.tool_end(action, tool_result, duration)
             observations.append(format_observation(action, tool_result))
+            if tool_result.ok and isinstance(action, (WriteFileAction, EditFileAction)):
+                wrote_file = True
             executed[action] = executed.get(action, 0) + 1
             last_action = action
 

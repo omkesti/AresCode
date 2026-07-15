@@ -128,6 +128,36 @@ async def test_loop_respects_interrupt_flag():
     assert provider.calls == 0
 
 
+async def test_loop_nudges_when_file_content_not_saved():
+    # Model dumps the file in a code fence (no tool) -> loop nudges -> model applies write_file.
+    provider = ScriptedProvider([
+        "Here is the updated file:\n```\nnew content\n```",
+        "<tool>write_file</tool><path>foo.txt</path>\n```\nnew content\n```",
+        "Done.",
+    ])
+    executor = FakeExecutor()
+    obs = RecordingObserver()
+    result = await run_turn(
+        "Please update foo.txt with new content", state=SessionState.new("m"),
+        provider=provider, executor=executor, system_prompt="sys", observer=obs, max_steps=5,
+    )
+    assert result == "Done."
+    assert any(a.tool == "write_file" for a in executor.calls)
+    assert any("no change applied" in n for n in obs.notices)
+
+
+async def test_loop_does_not_nudge_a_pure_question():
+    # A question that just happens to include a code fence must not trigger the write nudge.
+    provider = ScriptedProvider(["Here is how it works:\n```\nsome code\n```"])
+    obs = RecordingObserver()
+    result = await run_turn(
+        "What does foo do? Show me.", state=SessionState.new("m"),
+        provider=provider, executor=FakeExecutor(), system_prompt="sys", observer=obs, max_steps=5,
+    )
+    assert result.startswith("Here is how it works")
+    assert not any("no change applied" in n for n in obs.notices)
+
+
 # --- permission gate inside the loop (TASKS 4.1) ---------------------------
 
 def _bash_provider(cmds: list[str]) -> ScriptedProvider:

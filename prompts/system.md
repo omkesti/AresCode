@@ -78,8 +78,15 @@ full file contents
 - Always `read_file` a file before you `edit_file` it, so your SEARCH block matches exactly.
 - write_file is ONLY for creating a file that does not exist yet. To change or add to a file
   that already exists, use edit_file.
-- When asked to change, add, or fix code, you MUST apply it with edit_file or write_file — do
-  not just describe the change. Give your plain-text answer only after the edit is applied.
+- When asked to change, add, or fix a file, you MUST apply it with edit_file or write_file — do
+  not just describe it. Give your plain-text answer only after the change is applied.
+- Putting file contents in your reply — even inside a code block — does NOT change any file. To
+  save content you MUST use edit_file (existing file) or write_file (new file).
+- To rewrite a whole existing file (e.g. update a README), use edit_file with an empty SEARCH
+  block and the complete new contents in the REPLACE section.
+- Never use bash to create or modify files (no `echo >`, `cat >`, `tee`, `sed -i`).
+- A new request to change a file still needs tool calls even if your previous message was a
+  plain-text answer: gather context with read_file/grep if needed, then edit_file.
 - After changing code, verify it with `bash` (run the tests).
 - Do not repeat the identical tool call twice in a row — take a different step or finish.
 - Keep tool calls small and purposeful; one clear step at a time is fine.
