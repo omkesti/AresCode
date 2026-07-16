@@ -14,8 +14,10 @@ so weaker local models can still operate through a robust harness.
 ## Why AresCode
 
 Cloud coding agents are convenient, but they require sending code to a remote model. AresCode keeps
-the agent loop local by targeting Ollama's OpenAI-compatible API, with `qwen2.5-coder:14b-instruct`
-as the primary model and `qwen2.5-coder:7b` as a faster fallback.
+the agent loop local by targeting Ollama's OpenAI-compatible API. The out-of-the-box default is the
+light `qwen2.5-coder:7b` so a first run works on a low-VRAM machine; `qwen2.5-coder:14b-instruct` is
+a stronger opt-in you switch to at runtime with `/model`, and that choice is remembered as the
+default from the next launch on.
 
 The project favors predictable behavior over a large feature surface:
 
@@ -28,7 +30,7 @@ The project favors predictable behavior over a large feature surface:
 | Permission gate | Read-only actions auto-allow; writes, edits, and shell commands ask for approval with previews. |
 | Hard denials | Path escapes and dangerous command patterns are blocked before execution. |
 | Sessions | Save and resume prior conversations with `--resume`. |
-| Model switching | Switch installed Ollama models mid-session with `/model`, including per-model context settings. |
+| Model switching | Switch installed Ollama models mid-session with `/model` (per-model context settings); your last choice is remembered as the default next launch. |
 
 ## Quick Start
 
@@ -39,16 +41,17 @@ The project favors predictable behavior over a large feature surface:
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on `PATH`
 - Git
 
-Pull the recommended model:
-
-```powershell
-ollama pull qwen2.5-coder:14b-instruct
-```
-
-For lower-VRAM machines, pull the smaller fallback:
+Pull the default model:
 
 ```powershell
 ollama pull qwen2.5-coder:7b
+```
+
+For stronger instruction-following on a capable GPU, also pull the larger model and switch to it
+with `/model` (your choice is remembered next launch):
+
+```powershell
+ollama pull qwen2.5-coder:14b-instruct
 ```
 
 ### 2. Install AresCode for development
@@ -136,15 +139,19 @@ Session allowlists reset when the session ends. Persistent allowlists can be con
 
 Configuration is layered from lowest to highest precedence:
 
-1. Built-in defaults
-2. `~/.arescode/config.toml`
-3. `./.arescode.toml`
-4. CLI flags such as `--model` and `--ctx`
+1. Built-in defaults (`qwen2.5-coder:7b`)
+2. Remembered model — your last `/model` switch (`~/.arescode/last_model`)
+3. `~/.arescode/config.toml`
+4. `./.arescode.toml`
+5. CLI flags such as `--model` and `--ctx`
+
+The remembered model overrides only the built-in default, so a `model` set in a config file or
+passed via `--model` still wins.
 
 Example project config:
 
 ```toml
-model = "qwen2.5-coder:14b-instruct"
+model = "qwen2.5-coder:7b"
 base_url = "http://localhost:11434/v1"
 num_ctx = 16384
 temperature = 0.1

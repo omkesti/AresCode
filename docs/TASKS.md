@@ -14,7 +14,7 @@
 - [x] 0.3 Implement `config.py`: pydantic settings model; load order = defaults → `~/.arescode/config.toml` → `./.arescode.toml` → CLI flags. Fields: model name, base_url, num_ctx (default 16384), temperature (default 0.1), max_steps (default 25), timeouts
 - [x] 0.4 Implement `main.py` typer entry: `arescode` launches REPL in cwd; `--model`, `--ctx` flag overrides; validate cwd is a directory the user owns
 - [x] 0.5 Set up `tests/` with pytest, one smoke test, and a `fixtures/` sample mini-repo
-- [x] 0.6 Verify Ollama locally: `qwen2.5-coder:14b-instruct` pulled (7B is the low-VRAM fallback), OpenAI-compat endpoint responding, confirm num_ctx override works (log a warning if server ignores it)
+- [x] 0.6 Verify Ollama locally: `qwen2.5-coder:7b` pulled (the default; the 14B is an optional stronger opt-in — D13), OpenAI-compat endpoint responding, confirm num_ctx override works (log a warning if server ignores it)
 
 **Exit criteria:** `pipx run` / `python -m arescode` starts, loads config, prints model + context size, exits cleanly. Tests green in CI (GitHub Actions, lint + pytest).
 
@@ -29,7 +29,7 @@
 - [x] 1.5 Implement `core/state.py`: flat message history (system/user/assistant/tool roles), session autosave to `.arescode/sessions/<timestamp>.json`, `--resume` flag loads the latest
 - [x] 1.6 Slash commands v1: `/exit`, `/clear` (reset history), `/model <name>`, `/help`
 
-**Exit criteria:** hold a fluid multi-turn conversation with qwen2.5-coder:14b-instruct in the terminal; kill and resume a session; streaming feels instant on the 3050.
+**Exit criteria:** hold a fluid multi-turn conversation with qwen2.5-coder:7b (the default) in the terminal; kill and resume a session; streaming feels instant on the 3050.
 
 ---
 

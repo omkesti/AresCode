@@ -7,6 +7,7 @@ import io
 
 from rich.console import Console
 
+from arescode import config as config_module
 from arescode.config import Config, ModelSettings
 from arescode.core.models import ModelManager
 from arescode.core.state import SessionState
@@ -115,6 +116,8 @@ async def test_switch_model_command_switches_and_rebuilds_provider(tmp_path):
     assert new_provider.model == M14B
     assert admin.calls == [("unload", M7B), ("warmup", M14B)]
     assert executor.active_model == M14B
+    # D13: a successful switch is remembered as the next launch's default (isolated by conftest).
+    assert config_module.read_last_model() == M14B
 
 
 async def test_switch_model_ambiguous_target_is_rejected(tmp_path):
@@ -131,3 +134,4 @@ async def test_switch_model_ambiguous_target_is_rejected(tmp_path):
     assert state.model == M7B  # unchanged
     assert admin.calls == []
     assert new_provider is provider  # provider not rebuilt
+    assert config_module.read_last_model() is None  # D13: a rejected switch is not remembered

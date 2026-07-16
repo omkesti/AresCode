@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **AresCode** is a Claude Code–style terminal coding agent powered by **local models via Ollama**
-(primary target: `qwen2.5-coder:14b-instruct`; `qwen2.5-coder:7b` is the low-VRAM fallback).
+(out-of-the-box default: `qwen2.5-coder:7b`; `qwen2.5-coder:14b-instruct` is the stronger opt-in,
+switchable at runtime with `/model` and **remembered as the default from the next launch on** — D13).
 Package/command/import name is `arescode` (lowercase); the brand is "AresCode".
 
 `docs/context.md` is the architecture source of truth and `docs/TASKS.md` is the phased plan —
@@ -15,7 +16,8 @@ captures what actively shapes day-to-day work.
 ## Status
 
 - **Phases 0–4 are complete and verified** (M1 Talk, M2 Act, M3 Edit, M4 Trust).
-- Working today: layered config, the CLI entry point, an OpenAI-compatible **streaming provider**
+- Working today: layered config (incl. a **remembered model default** — D13), the CLI entry point,
+  an OpenAI-compatible **streaming provider**
   over Ollama, an interactive **REPL** (slash commands, live markdown), **session save/resume**,
   the **lenient parser + read-only tools + master loop**, the **SEARCH/REPLACE edit cascade**
   (retry + whole-file fallback + telemetry), and the **deny-first permission gate** (auto-allow
@@ -68,9 +70,11 @@ minimal harness because Claude is smart; a local model is not. So AresCode is de
 That means: training-familiar text output protocols (not free-form JSON), lenient forgiving
 parsers, retry-with-error-feedback on failed edits, a tiny 6-tool surface, and aggressive context
 discipline. Do not "simplify" the harness by trusting the model to be reliable — reliability is
-supposed to live in the harness. The default model is now the stronger `qwen2.5-coder:14b-instruct`
-(D11), but the harness is unchanged: none of it was a 7B workaround, it is model-robustness, and a
-stronger model raises the floor without removing the reason the floor exists.
+supposed to live in the harness. The out-of-the-box default is the light `qwen2.5-coder:7b` so a
+first run is low-VRAM-safe (D13); a `/model` switch to the stronger `qwen2.5-coder:14b-instruct`
+(D11) is remembered as the default from the next launch on. The harness is unchanged either way:
+none of it was a 7B workaround, it is model-robustness, and a stronger model raises the floor
+without removing the reason the floor exists.
 
 ## Architecture in brief (see `docs/context.md` §3–4)
 

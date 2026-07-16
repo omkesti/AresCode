@@ -3,6 +3,7 @@
 Precedence, lowest to highest (TASKS 0.3, context.md §4.7):
 
     built-in defaults
+      -> remembered model          (~/.arescode/last_model, D13)
       -> ~/.arescode/config.toml   (global)
       -> ./.arescode.toml          (per project)
       -> CLI flag overrides
@@ -10,6 +11,10 @@ Precedence, lowest to highest (TASKS 0.3, context.md §4.7):
 ``load_config`` merges these layers and validates the result. Unknown keys are
 rejected (``extra="forbid"``) so a typo in a TOML file fails loudly instead of
 being silently ignored.
+
+The *remembered model* (D13) is machine-managed state written by a ``/model`` switch: it seeds the
+``model`` key just above the built-in default so a switch sticks across launches, while an explicit
+``model`` in a config file or a ``--model`` flag still overrides it. See :func:`read_last_model`.
 """
 
 from __future__ import annotations
@@ -23,6 +28,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 GLOBAL_CONFIG_PATH = Path.home() / ".arescode" / "config.toml"
 PROJECT_CONFIG_NAME = ".arescode.toml"
+
+# Machine-managed "last model the user switched to" (D13). Kept separate from the hand-edited
+# config.toml so remembering a choice never rewrites a user's comments/formatting.
+LAST_MODEL_PATH = Path.home() / ".arescode" / "last_model"
 
 # Pre-rename ("agent-cli") locations, kept only so the one-time migration below can find them.
 LEGACY_GLOBAL_DIR = Path.home() / ".agentcli"
@@ -50,17 +59,17 @@ class Config(BaseModel):
     # protected_namespaces=() silences pydantic's warning about the ``model`` field name.
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    # Primary target is now the 14B instruct tag (stronger instruction-following than 7B); the
-    # harness stays unchanged (D11). Set model = "qwen2.5-coder:7b" in config for a faster fallback.
-    model: str = Field(
-        default="qwen2.5-coder:14b-instruct", description="Ollama model tag to run."
-    )
+    # The out-of-the-box default is the light 7B tag so a first run works on a low-VRAM box (D13).
+    # The stronger `qwen2.5-coder:14b-instruct` (D11) is one `/model` switch away, and that choice
+    # is remembered (LAST_MODEL_PATH) so it becomes the default from the next launch on. Either way
+    # the harness is unchanged — robustness is not a 7B workaround.
+    model: str = Field(default="qwen2.5-coder:7b", description="Ollama model tag to run.")
     base_url: str = Field(
         default="http://localhost:11434/v1",
         description="OpenAI-compatible endpoint base URL.",
     )
-    # 16384 is a good default. 14B Q4 is ~9GB of weights and the KV cache grows with num_ctx, so on
-    # a <12GB GPU Ollama offloads to CPU (slower) — drop this to 8192 if generation is too slow.
+    # 16384 fits the 7B default (~4.7GB Q4) comfortably. The KV cache grows with num_ctx, so if you
+    # switch to a 14B on a <12GB GPU give it a smaller window via [models."<tag>"] (or drop this).
     num_ctx: int = Field(default=16384, gt=0, description="Context window size in tokens.")
     temperature: float = Field(default=0.1, ge=0.0, description="Sampling temperature.")
     max_steps: int = Field(default=25, gt=0, description="Hard cap on agent loop steps per turn.")
@@ -112,11 +121,34 @@ def _read_toml(path: Path) -> dict[str, Any]:
         return tomllib.load(fh)
 
 
+def read_last_model(path: Path | None = None) -> str | None:
+    """Return the model last selected via ``/model``, or ``None`` if never set (D13).
+
+    This is machine-managed state — one bare model tag on a single line. It overrides only the
+    built-in default (see :func:`load_config`); an explicit ``model`` in a config file or on the
+    CLI still wins. A missing/blank file (or any read error) reads as "not set".
+    """
+    path = path or LAST_MODEL_PATH
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def save_last_model(model: str, path: Path | None = None) -> None:
+    """Persist ``model`` as the remembered default for the next launch (D13)."""
+    path = path or LAST_MODEL_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(model.strip() + "\n", encoding="utf-8")
+
+
 def load_config(
     *,
     project_dir: Path | None = None,
     overrides: dict[str, Any] | None = None,
     global_config_path: Path | None = None,
+    last_model_path: Path | None = None,
 ) -> Config:
     """Build a :class:`Config` by merging every configuration layer.
 
@@ -125,11 +157,17 @@ def load_config(
         overrides: CLI-flag values; keys whose value is ``None`` are ignored so an
             unset flag never clobbers a file/default value.
         global_config_path: Location of the global config (overridable for tests).
+        last_model_path: Location of the remembered-model file (overridable for tests).
     """
     project_dir = project_dir or Path.cwd()
     global_config_path = global_config_path or GLOBAL_CONFIG_PATH
 
     merged: dict[str, Any] = {}
+    # The remembered model (D13) overrides only the built-in default: seed it here so the config
+    # files and CLI overrides below still take precedence when they set ``model`` explicitly.
+    remembered = read_last_model(last_model_path)
+    if remembered:
+        merged["model"] = remembered
     merged.update(_read_toml(global_config_path))
     merged.update(_read_toml(project_dir / PROJECT_CONFIG_NAME))
     if overrides:

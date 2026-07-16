@@ -5,7 +5,7 @@
 
 **Status:** Phases 0–4 complete (M1 Talk, M2 Act, M3 Edit, M4 Trust); Phase 5 (Endure) next
 **Name:** `AresCode`
-**Primary model target:** `qwen2.5-coder:14b-instruct` via Ollama (fallback: `qwen2.5-coder:7b`)
+**Default model:** `qwen2.5-coder:7b` via Ollama (low-VRAM-safe out of the box); `qwen2.5-coder:14b-instruct` is the stronger opt-in — switch at runtime with `/model` and it is remembered as the default from the next launch on (D13)
 **Author:** Om — solo project
 
 ---
@@ -27,7 +27,7 @@ A CLI tool that works like Claude Code but is powered by locally installed model
 4. Permission gate (auto-allow reads, confirm writes/shell with diff previews)
 5. Context management: repo map, `ARES.md` project memory, token-budget compaction
 6. Session persistence (save/resume conversation state)
-7. Mid-session model switching (`/model`) with safe VRAM hot-swapping — pick from installed models, the previous one is explicitly unloaded before the new one loads, with per-model settings (D12)
+7. Mid-session model switching (`/model`) with safe VRAM hot-swapping — pick from installed models, the previous one is explicitly unloaded before the new one loads, with per-model settings (D12); the last switch is remembered as the next launch's default (D13)
 
 **Explicitly deferred (post-MVP):** sub-agents, MCP support, TODO planner, tree-sitter symbol maps, *automatic* multi-model routing (per-task model selection — distinct from the manual `/model` switch above), IDE integration, hooks, custom slash commands.
 
@@ -47,7 +47,7 @@ Claude Code gets away with a minimal harness because Claude is smart. A local mo
 
 **Rule of thumb for every design decision:** "Would this work if the model gets it 80% right?" If the answer requires 99% model accuracy, redesign the harness, not the prompt.
 
-**On the model upgrade (D11).** The primary target is now `qwen2.5-coder:14b-instruct` rather than the original `qwen2.5-coder:7b`. The 14B is a noticeably stronger instruction-follower, but **the harness above is retained unchanged.** None of it was a 7B-specific workaround — the lenient parser, retry loops, whole-file fallback, and 6-tool surface are *model-robustness* measures that keep the agent reliable across any local model (and across a bad generation from a good one). A stronger model raises the floor; it does not remove the reason the floor exists. The 80%-right rule of thumb still governs every decision.
+**On the model choice (D11, D13).** D11 introduced `qwen2.5-coder:14b-instruct` as a noticeably stronger instruction-follower; D13 makes the light `qwen2.5-coder:7b` the **out-of-the-box default** again so a first run is low-VRAM-safe, with the 14B one `/model` switch away and *remembered* as the default from the next launch on. Either way **the harness above is retained unchanged.** None of it was a 7B-specific workaround — the lenient parser, retry loops, whole-file fallback, and 6-tool surface are *model-robustness* measures that keep the agent reliable across any local model (and across a bad generation from a good one). A stronger model raises the floor; it does not remove the reason the floor exists. The 80%-right rule of thumb still governs every decision.
 
 ---
 
@@ -76,7 +76,7 @@ Layered, single-threaded, one flat message history. Modeled on Claude Code's mas
 └───────┬─────────┘                 │ approved
 ┌───────▼─────────┐      ┌─────────▼──────────┐
 │ Ollama server    │      │ Tool executor      │
-│ qwen2.5-coder:14b│      │ read·edit·bash·grep│
+│ qwen2.5-coder:7b │      │ read·edit·bash·grep│
 └──────────────────┘      └─────────┬──────────┘
                           ┌─────────▼──────────┐
                           │ Workspace          │
@@ -207,7 +207,7 @@ Deny-first philosophy, per-action approval:
 
 **Ollama-specific gotchas (hard-won, do not skip):**
 - `num_ctx` **must be set explicitly** — Ollama defaults to 4096 tokens regardless of model capability, which silently truncates agent context and looks like "the model is dumb." Set 16k default; 32k is qwen2.5-coder's max but watch KV-cache VRAM.
-- **14B VRAM budget:** `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights, and the KV cache grows with `num_ctx` on top of that. On a GPU with <12GB VRAM (e.g. an RTX 3050 6GB) Ollama offloads layers to the CPU and generation slows sharply; the weights + a large KV cache spill to system RAM and crawl. Mitigation: drop `num_ctx` to 8192, or fall back to `qwen2.5-coder:7b` (≈4.7GB) on low-VRAM machines.
+- **14B VRAM budget:** the opt-in `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights, and the KV cache grows with `num_ctx` on top of that. On a GPU with <12GB VRAM (e.g. an RTX 3050 6GB) Ollama offloads layers to the CPU and generation slows sharply; the weights + a large KV cache spill to system RAM and crawl. Mitigation: drop `num_ctx` to 8192, or stay on the default `qwen2.5-coder:7b` (≈4.7GB) on low-VRAM machines.
 - `temperature`: 0.0–0.2 for agentic work.
 - `keep_alive`: set generously (e.g. `30m`) so the model isn't reloaded between turns.
 
@@ -236,6 +236,14 @@ On a switch the token budget is recomputed for the new window; if the history no
 *smaller* window it is compacted immediately (Phase 5 summarization once built — TASKS 5.4; until
 then a visible hard-truncation of the oldest turns). Edit telemetry (§4.3 / TASKS 3.6) is tagged
 with the model that produced each edit, so `/stats` groups by model.
+
+**Remembered model (D13).** The out-of-the-box default is the light `qwen2.5-coder:7b`, so a first
+run works on a low-VRAM box without tuning. A successful `/model` switch writes the chosen tag to
+`~/.arescode/last_model` (bare text, machine-managed — kept out of the hand-edited `config.toml` so
+remembering a choice never rewrites a user's comments). On the next launch `load_config` seeds that
+model *just above the built-in default*, so a capable machine that switches to the 14B keeps it —
+while an explicit `model` in a config file or a `--model` flag still overrides it. A launch-time
+`--model` is a per-launch override and is **not** remembered; only the in-session `/model` switch is.
 
 ### 4.8 System prompt (`prompts/system.md`)
 
@@ -335,6 +343,7 @@ Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n
 | D10 | Hand-write `loop.py` + `parser.py` first, no AI codegen | Full AI-assisted build | Explicit skill-building goal: these ~300 lines are the soul of the project |
 | D11 | Upgrade default model to `qwen2.5-coder:14b-instruct`; harness unchanged; re-baseline edit telemetry | Stay on 7B; or drop harness weight now that the model is stronger | Stronger instruction-following at a modest VRAM cost, with zero harness changes (robustness ≠ 7B workaround); 7B edit-success baselines are now stale and must be re-measured |
 | D12 | Mid-session multi-model switching with a **native admin API** (`ollama_admin.py`) kept isolated from the chat provider; exclusive VRAM residency (unload-before-load); per-model `num_ctx`/`temperature` | Automatic per-task routing; keeping only one model per process (restart to switch); driving unload through the chat provider | A 6GB GPU can hold one model at a time, so a hot-swap must evict the old one first — an Ollama-native operation the OpenAI-compat surface can't do. Isolating it preserves D5 portability (chat stays on `/v1`); admin 404s degrade to a name-only switch. Manual `/model` only — *automatic routing* stays deferred |
+| D13 | Default to the light `qwen2.5-coder:7b`, and **remember the last `/model` switch** (`~/.arescode/last_model`) as the next launch's default | Keep the 14B as the hard default (D11); or let the remembered choice override config/CLI too; or rewrite `model` back into `config.toml` on switch | A first run should work on a low-VRAM box out of the box; a capable machine switches to the 14B once and it sticks. The remembered model overrides *only* the built-in default — an explicit `model` in config or a `--model` flag still wins, so pins stay authoritative. A separate machine-managed file avoids rewriting the hand-edited `config.toml`. Harness unchanged (robustness ≠ a 7B workaround) |
 
 ---
 
@@ -342,7 +351,7 @@ Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n
 
 - **Edit reliability floor:** even with the full cascade, a local model may fail multi-file or long-range edits. Mitigation: whole-file fallback, small-diff prompting, and honest measurement (track edit success rate from day one).
 - **Stale edit-success baseline (post-D11):** every edit-success number to date — including Phase 3's ≥8/10 gauntlet result — was measured on `qwen2.5-coder:7b` and is now stale. The telemetry counters are *not* reset in code, but treat the recorded figures as unverified until Phase 3's 10-task edit gauntlet is re-run **once** on `qwen2.5-coder:14b-instruct` to establish the new baseline. `/stats` reports raw counters; it does not know which model produced them.
-- **VRAM ceiling (<12GB GPUs, e.g. RTX 3050 6GB):** `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights; on a sub-12GB GPU Ollama offloads to CPU and the weights + a large KV cache spill to system RAM and crawl. Mitigation: default 16k context (drop to 8192 on low VRAM), aggressive compaction, the `qwen2.5-coder:7b` fallback, and documented `num_ctx`/VRAM tradeoffs.
+- **VRAM ceiling (<12GB GPUs, e.g. RTX 3050 6GB):** the default is the ≈4.7GB `qwen2.5-coder:7b`, which fits comfortably; the ceiling bites only when the user opts into `qwen2.5-coder:14b-instruct` (D13). Its Q4 weights are ≈9GB, so on a sub-12GB GPU Ollama offloads to CPU and the weights + a large KV cache spill to system RAM and crawl. Mitigation: keep the 7B default, a smaller per-model window for the 14B (8192, drop from the 16k default), aggressive compaction, and documented `num_ctx`/VRAM tradeoffs.
 - **Loop pathologies:** small models re-read the same file forever or declare victory early. Mitigation: step cap, duplicate-action detection (same tool + same args twice in a row → inject a nudge message).
 - **Prompt injection via tool results:** file contents and command output are untrusted. Gate logic never consults model prose; hardening is a tracked post-MVP item.
 - **Scope creep:** the Claude Code feature list is enormous. The MVP definition in §1 is the contract — anything else goes to a `LATER.md`.

@@ -18,7 +18,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
-from arescode.config import Config
+from arescode.config import Config, save_last_model
 from arescode.core.context import load_system_prompt
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
@@ -35,7 +35,8 @@ HELP_TEXT = """\
 Commands:
   /help            show this help
   /clear           reset the conversation history
-  /model [name]    no arg: pick from installed models; with a name: switch (unloads the old one)
+  /model [name]    no arg: pick from installed models; with a name: switch (unloads the old one).
+                   The chosen model is remembered as the default for the next launch.
   /verbose         toggle full tool output in the trace
   /stats           show edit telemetry for this session (grouped by model)
   /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
@@ -222,6 +223,9 @@ async def _switch_model(
         render.note(console, warning)
     config = result.config
     provider = OpenAICompatProvider.from_config(config)
+    # Remember this choice so the next launch starts on it (D13); overrides only the built-in
+    # default, so a config-file `model` or `--model` flag still wins next time.
+    save_last_model(result.model)
     console.print(
         f"[bold cyan]{result.model}[/bold cyan]  num_ctx={result.num_ctx}  "
         f"context {result.context_pct:.0f}% used"

@@ -24,14 +24,21 @@ Install these once and confirm each responds:
 | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) | 13+ | `rg --version` |
 | Git | any | `git --version` |
 
-Pull the target model (14B Q4, ≈9 GB, one time):
+Pull the default model (7B Q4, ≈4.7 GB, one time):
+
+```powershell
+ollama pull qwen2.5-coder:7b
+```
+
+For stronger instruction-following on a capable GPU, also pull the larger model and switch to it in
+the REPL with `/model` (your choice is remembered as the default next launch — D13):
 
 ```powershell
 ollama pull qwen2.5-coder:14b-instruct
 ```
 
 > On a GPU with <12 GB VRAM, Ollama offloads part of the 14B model to CPU (slower). If generation
-> is too slow, either drop `num_ctx` to 8192 or fall back to the smaller `qwen2.5-coder:7b`.
+> is too slow, either drop its `num_ctx` to 8192 or stay on the default `qwen2.5-coder:7b`.
 
 Confirm it is installed and the server is up:
 
@@ -100,7 +107,7 @@ python scripts/check_ollama.py
 Options:
 
 ```powershell
-python scripts/check_ollama.py --model qwen2.5-coder:14b-instruct --ctx 16384 --base-url http://localhost:11434
+python scripts/check_ollama.py --model qwen2.5-coder:7b --ctx 16384 --base-url http://localhost:11434
 ```
 
 Expected: `PASS` lines for the model and completion, ending in `OK — all checks passed`.
@@ -136,7 +143,7 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 |---|---|
 | `/help` | list commands |
 | `/clear` | reset the conversation history |
-| `/model [name]` | no arg: pick from installed models; with a name: switch (unloads the old model from VRAM first) |
+| `/model [name]` | no arg: pick from installed models; with a name: switch (unloads the old model from VRAM first). The chosen model is remembered as the default next launch (D13) |
 | `/verbose` | toggle full tool output in the trace |
 | `/stats` | show edit telemetry for the session (grouped by model) |
 | `/allow [cmd]` | no arg: show the allowlist; with a token: always allow that bash command |
@@ -150,9 +157,9 @@ session). Path escapes outside the project root and blocklisted commands are ref
 **Ctrl+C** cancels the current response without ending the session. Sessions autosave to
 `.arescode/sessions/<timestamp>.json` after each reply.
 
-> First reply after a cold start is slow while the 14B model loads into VRAM (longer than the 7B
-> did, and slower still if it spills to CPU on a <12 GB GPU); subsequent replies are near-instant
-> because `keep_alive` keeps it warm.
+> First reply after a cold start is slow while the model loads into VRAM; subsequent replies are
+> near-instant because `keep_alive` keeps it warm. The default 7B loads quickly; the opt-in 14B
+> takes longer, and slower still if it spills to CPU on a <12 GB GPU.
 
 ---
 
@@ -191,18 +198,23 @@ ruff format .                      # format (optional)
 
 Settings are layered, lowest → highest precedence:
 
-1. Built-in defaults (in `src/arescode/config.py`)
-2. `~/.arescode/config.toml` — global, all projects
-3. `./.arescode.toml` — per project (repo root)
-4. CLI flags (`--model`, `--ctx`)
+1. Built-in defaults (`qwen2.5-coder:7b`, in `src/arescode/config.py`)
+2. Remembered model — your last `/model` switch (`~/.arescode/last_model`, D13)
+3. `~/.arescode/config.toml` — global, all projects
+4. `./.arescode.toml` — per project (repo root)
+5. CLI flags (`--model`, `--ctx`)
+
+The remembered model overrides only the built-in default, so a `model` in a config file or a
+`--model` flag still wins. A launch-time `--model` is a per-launch override and is not remembered —
+only the in-session `/model` switch updates `~/.arescode/last_model`.
 
 Example `./.arescode.toml`:
 
 ```toml
-model = "qwen2.5-coder:14b-instruct"
-# model = "qwen2.5-coder:7b"        # faster, weaker fallback for low-VRAM machines
+model = "qwen2.5-coder:7b"          # out-of-the-box default; switch up to the 14B with /model
+# model = "qwen2.5-coder:14b-instruct"   # stronger, needs more VRAM (see per-model num_ctx below)
 base_url = "http://localhost:11434/v1"
-num_ctx = 16384                     # default window; 14B Q4 ≈ 9GB, KV cache grows with num_ctx
+num_ctx = 16384                     # default window; 7B Q4 ≈ 4.7GB, KV cache grows with num_ctx
 temperature = 0.1
 max_steps = 25
 request_timeout = 120.0
@@ -265,7 +277,7 @@ python scripts/check_ollama.py
 |---|---|
 | `ollama: command not found` | Install Ollama and reopen the terminal. |
 | `check_ollama.py` → connection refused | Start the server: `ollama serve`. |
-| Model missing in `check_ollama.py` | `ollama pull qwen2.5-coder:14b-instruct`. |
+| Model missing in `check_ollama.py` | `ollama pull qwen2.5-coder:7b` (or the 14B if you switched to it). |
 | Model feels "dumb" / truncated | Confirm `num_ctx` is set (Ollama silently defaults to 4096). |
 | PowerShell won't activate the venv | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then re-activate. |
 | `rg: command not found` in a search | Install ripgrep and ensure it's on `PATH`. |

@@ -1,7 +1,7 @@
 """Phase 0 smoke test: the package imports and layered configuration behaves.
 
-Covers the full precedence chain (defaults < global < project < CLI) so a regression in
-``load_config`` fails loudly. See TASKS 0.3 / 0.5.
+Covers the full precedence chain (defaults < remembered model < global < project < CLI) so a
+regression in ``load_config`` fails loudly. See TASKS 0.3 / 0.5, D13.
 """
 
 from __future__ import annotations
@@ -11,7 +11,13 @@ from pydantic import ValidationError
 
 from arescode import __version__
 from arescode import config as config_module
-from arescode.config import Config, load_config, migrate_legacy_paths
+from arescode.config import (
+    Config,
+    load_config,
+    migrate_legacy_paths,
+    read_last_model,
+    save_last_model,
+)
 
 
 def test_version_is_a_string():
@@ -21,7 +27,7 @@ def test_version_is_a_string():
 
 def test_default_config_values():
     cfg = Config()
-    assert cfg.model == "qwen2.5-coder:14b-instruct"
+    assert cfg.model == "qwen2.5-coder:7b"
     assert cfg.base_url == "http://localhost:11434/v1"
     assert cfg.num_ctx == 16384
     assert cfg.temperature == 0.1
@@ -30,7 +36,7 @@ def test_default_config_values():
 
 def test_load_config_falls_back_to_defaults(tmp_path):
     cfg = load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
-    assert cfg.model == "qwen2.5-coder:14b-instruct"
+    assert cfg.model == "qwen2.5-coder:7b"
     assert cfg.num_ctx == 16384
 
 
@@ -61,6 +67,51 @@ def test_none_overrides_are_ignored(tmp_path):
         overrides={"model": None, "num_ctx": None},
     )
     assert cfg.model == "from-project"  # an unset CLI flag must not clobber the file value
+
+
+# --- remembered model (D13) ------------------------------------------------
+
+
+def test_save_and_read_last_model_roundtrip(tmp_path):
+    last = tmp_path / "state" / "last_model"  # parent dir created on save
+    assert read_last_model(last) is None  # nothing remembered yet
+    save_last_model("qwen2.5-coder:14b-instruct", last)
+    assert read_last_model(last) == "qwen2.5-coder:14b-instruct"
+
+
+def test_remembered_model_overrides_builtin_default(tmp_path):
+    last = tmp_path / "last_model"
+    save_last_model("qwen2.5-coder:14b-instruct", last)
+    cfg = load_config(
+        project_dir=tmp_path,
+        global_config_path=tmp_path / "global.toml",
+        last_model_path=last,
+    )
+    assert cfg.model == "qwen2.5-coder:14b-instruct"  # remembered beats the 7B built-in default
+
+
+def test_config_file_model_beats_remembered(tmp_path):
+    last = tmp_path / "last_model"
+    save_last_model("remembered:tag", last)
+    (tmp_path / ".arescode.toml").write_text('model = "from-project"\n')
+    cfg = load_config(
+        project_dir=tmp_path,
+        global_config_path=tmp_path / "global.toml",
+        last_model_path=last,
+    )
+    assert cfg.model == "from-project"  # an explicit config pin still wins
+
+
+def test_cli_model_beats_remembered(tmp_path):
+    last = tmp_path / "last_model"
+    save_last_model("remembered:tag", last)
+    cfg = load_config(
+        project_dir=tmp_path,
+        global_config_path=tmp_path / "global.toml",
+        last_model_path=last,
+        overrides={"model": "from-cli"},
+    )
+    assert cfg.model == "from-cli"  # a --model flag is a per-launch override, highest of all
 
 
 def test_unknown_config_key_is_rejected(tmp_path):
