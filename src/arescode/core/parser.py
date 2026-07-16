@@ -5,7 +5,10 @@ drift (``<<<<<<`` vs ``<<<<<<<``), stray whitespace, missing closing tags, filen
 few lines off, nested fences, and multiple actions per response, in any order
 (context.md §4.2-4.3, TASKS 2.1).
 
-Authored under an explicit user override of decision D10 for Phase 2.
+Authored under an explicit user override of decision D10 for Phase 2. The write_file body
+extraction was later hardened (line-based fence scan, ``_fenced_blocks`` / ``_write_content``) by
+Claude Code under the author's explicit request, to absorb a real recurring failure where the model
+wraps the tool tag in its own fence and the code lands in a *second* fence.
 """
 
 from __future__ import annotations
@@ -32,9 +35,6 @@ SR_RE = re.compile(
     r"^<{3,}[ \t]*SEARCH[ \t]*$\n(.*?)^={3,}[ \t]*$\n(.*?)^>{3,}[ \t]*REPLACE[ \t]*$",
     re.DOTALL | re.MULTILINE | re.IGNORECASE,
 )
-
-# A fenced code block; the info string (language) after ``` is optional.
-FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 _PATHY = re.compile(r"^[\w./\\-]+$")
 _PATH_TAG = re.compile(r"<path>\s*(.*?)\s*</path>", re.IGNORECASE)
@@ -105,9 +105,7 @@ def _parse_tool(text: str, match: re.Match[str]) -> Action | None:
         return BashAction(cmd) if cmd else None
     if name == "write_file":
         path = _param(window, "path")
-        content = _fence(window)
-        if content is None:
-            content = _param(window, "content")
+        content = _write_content(window)
         return WriteFileAction(path, content or "") if path else None
     return None  # unknown tool name
 
@@ -135,9 +133,47 @@ def _param(window: str, name: str) -> str | None:
     return None
 
 
-def _fence(window: str) -> str | None:
-    m = FENCE_RE.search(window)
-    return m.group(1).removesuffix("\n") if m else None
+def _fenced_blocks(window: str) -> list[str]:
+    """Every fenced code block in ``window``, in order, as a line-based scan (not one regex).
+
+    A single lazy ```...``` regex pairs the first ``` with the *next* ```, which breaks on the
+    model's common malformed write_file shape — it wraps the tag in its own fence, so the code
+    lands in a *second* fence:
+
+        ```
+        ```python
+        <code>
+        ```
+
+    Regex-pairing captures the empty block between the first two ```; the code is lost. Scanning by
+    line fixes this: any line whose first non-space token starts with ``` ends the current block
+    (whether it is a bare closing fence or the opening of the next one), so the empty fence and the
+    code fence come out as separate blocks and the caller can pick the non-empty one.
+    """
+    lines = window.split("\n")
+    blocks: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if lines[i].lstrip().startswith("```"):
+            i += 1  # consume the opening fence line
+            body: list[str] = []
+            while i < n and not lines[i].lstrip().startswith("```"):
+                body.append(lines[i])
+                i += 1
+            if i < n and lines[i].strip() == "```":  # consume a bare closing fence (not a new open)
+                i += 1
+            blocks.append("\n".join(body))
+        else:
+            i += 1
+    return blocks
+
+
+def _write_content(window: str) -> str | None:
+    """The body for a write_file: the first non-empty fenced block, else a <content> tag."""
+    for block in _fenced_blocks(window):
+        if block.strip():
+            return block
+    return _param(window, "content")
 
 
 def _int(value: str | None) -> int | None:

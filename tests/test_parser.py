@@ -207,6 +207,38 @@ CASES: list[tuple[str, str, list]] = [
         [WriteFileAction("notes.txt", "line one\nline two")],
     ),
     (
+        # Real recurring failure: the model wraps the tag in its own fence, so the code lands in a
+        # SECOND fence. The stray empty fence must be skipped and the code recovered.
+        "write_file_tag_wrapped_then_code_fence",
+        d(
+            """
+            ```
+            <tool>write_file</tool><path>hello.py</path>
+            ```
+            ```python
+            def merge_sort(arr):
+                return sorted(arr)
+            ```
+            """
+        ),
+        [WriteFileAction("hello.py", "def merge_sort(arr):\n    return sorted(arr)")],
+    ),
+    (
+        # An outright empty fence right after the tag, with the real content in the next fence.
+        "write_file_empty_fence_then_content",
+        d(
+            """
+            <tool>write_file</tool><path>x.py</path>
+            ```
+            ```
+            ```python
+            print("ok")
+            ```
+            """
+        ),
+        [WriteFileAction("x.py", 'print("ok")')],
+    ),
+    (
         "prose_around_action",
         "Let me check the file.\n<tool>read_file</tool><path>a.py</path>\nThen I'll decide.",
         [ReadFileAction("a.py")],

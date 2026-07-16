@@ -60,12 +60,14 @@ SEARCH an existing line (e.g. the last line of a function) and REPLACE it with t
 plus your new code. If a SEARCH block keeps failing to match, return the ENTIRE updated file
 using an empty SEARCH block (nothing between SEARCH and `=======`).
 
-**write_file** — create a NEW file (fails if it already exists — use edit_file to modify):
-```
+**write_file** — create a NEW file (fails if it already exists — use edit_file to modify). Emit the
+tag on its own line, then the file's COMPLETE contents in ONE fenced code block directly below it.
+The real code goes INSIDE the fence — never leave the fence empty, and never put an extra empty
+fence between the tag and the code:
+
 <tool>write_file</tool><path>FILE</path>
 ```
-```python
-full file contents
+FULL FILE CONTENTS GO HERE
 ```
 
 # Rules
@@ -78,6 +80,9 @@ full file contents
 - Always `read_file` a file before you `edit_file` it, so your SEARCH block matches exactly.
 - write_file is ONLY for creating a file that does not exist yet. To change or add to a file
   that already exists, use edit_file.
+- For write_file, put the file's full contents inside ONE fenced code block on the lines right
+  after the `<tool>write_file</tool><path>...</path>` tag. Never emit an empty fence, and never
+  add a second fence — the very next fence after the tag must contain the actual code.
 - When asked to change, add, or fix a file, you MUST apply it with edit_file or write_file — do
   not just describe it. Give your plain-text answer only after the change is applied.
 - Putting file contents in your reply — even inside a code block — does NOT change any file. To
