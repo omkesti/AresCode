@@ -3,7 +3,7 @@
 > A Claude Code–style terminal coding agent that runs entirely on local models via Ollama.
 > This document is the single source of truth for the project's goals, architecture, design decisions, and structure. Feed it to any AI assistant or new collaborator to get them fully up to speed.
 
-**Status:** Phases 0–4 complete (M1 Talk, M2 Act, M3 Edit, M4 Trust); Phase 5 (Endure) next
+**Status:** Phases 0–5 complete (M1 Talk, M2 Act, M3 Edit, M4 Trust, M5 Endure); Phase 6 (Polish) next
 **Name:** `AresCode`
 **Default model:** `qwen2.5-coder:7b` via Ollama (low-VRAM-safe out of the box); `qwen2.5-coder:14b-instruct` is the stronger opt-in — switch at runtime with `/model` and it is remembered as the default from the next launch on (D13)
 **Author:** Om — solo project
@@ -182,6 +182,8 @@ Small models die silently when context bloats. Three mechanisms:
 3. **Compaction** — token count estimated at `len(text) // 4`. At 75% of the context budget, summarize the oldest turns into a single assistant message ("Summary of earlier work: …") and drop the originals. **Never compact:** the system prompt, the current user task statement, and the last 4 tool results.
 
 **Context budget config:** default `num_ctx = 16384`. (See 4.7 — Ollama's silent 4k default is a known killer.)
+
+**As built (Phase 5).** All three mechanisms live in **`core/context.py`**, which owns the token-budget primitives (`estimate_tokens` = `len // 4`; `budget_for` = `num_ctx` − a 1,500-token reply reserve, `REPLY_RESERVE_TOKENS`); `core/models.py` re-exports them so the D12 switch path keeps importing from `arescode.core.models` unchanged. **Repo map** (`repo/repomap.py`, TASKS 5.1): a gitignore-filtered tree with file sizes, sharing the search tools' ignore rules, rendered at the deepest nesting depth whose text fits ~1,500 tokens (breadth-first depth truncation) with a per-directory width cap so one huge folder can't dominate; `/map` redisplays it. **ARES.md** (TASKS 5.2): `load_project_memory` reads it from the project root; `assemble_system_prompt` composes base prompt + `ARES.md` + repo map once at session start (empty sections omitted); `arescode init` writes a starter template. **Compaction** (TASKS 5.4): `maybe_compact` fires at the 75% threshold from the top of each loop step, folding the compactable middle of the history into one `assistant` "Summary of earlier work" message produced by a dedicated `provider.complete` call — the **current task message is pinned by identity** and the last 4 messages are protected, so both survive; a failed/empty summary degrades to `hard_truncate`. `/compact` forces it (`compact_now`); a subtle indicator fires when it runs. The folded history is ordinary messages, so `SessionState.save`/`--resume` round-trip it. The `[HAND]` loop gained only a `num_ctx` parameter and the one `maybe_compact` call (the algorithm is entirely in `context.py`), added under the author's explicit authorization.
 
 ### 4.6 Permission gate (`permissions/gate.py`)
 

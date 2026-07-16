@@ -146,6 +146,39 @@ async def test_loop_stops_when_action_repeats_without_progress():
     assert any("stopping" in n for n in obs.notices)
 
 
+async def test_loop_compacts_when_history_over_budget():
+    # A long pre-existing history + num_ctx -> the loop compacts at the top of the step. The same
+    # scripted provider answers the summarization call ("summary") and then the turn ("done").
+    state = SessionState.new("m")
+    for i in range(30):
+        state.append("user" if i % 2 == 0 else "assistant", "x" * 4000)  # ~30000 tokens
+    provider = ScriptedProvider(["condensed summary", "done"])
+    obs = RecordingObserver()
+
+    result = await run_turn(
+        "finish up", state=state, provider=provider, executor=FakeExecutor(),
+        system_prompt="sys", observer=obs, max_steps=5, num_ctx=8192,
+    )
+
+    assert result == "done"
+    assert any("compacted history" in n for n in obs.notices)
+    assert any(m.content.startswith("Summary of earlier work:") for m in state.messages)
+
+
+async def test_loop_without_num_ctx_never_compacts():
+    # Backwards-compatible default: no num_ctx -> no compaction call, even with a big history.
+    state = SessionState.new("m")
+    for i in range(30):
+        state.append("user" if i % 2 == 0 else "assistant", "x" * 4000)
+    provider = ScriptedProvider(["done"])  # a single completion; no summarization call consumed
+    result = await run_turn(
+        "hi", state=state, provider=provider, executor=FakeExecutor(),
+        system_prompt="sys", max_steps=5,
+    )
+    assert result == "done"
+    assert provider.calls == 1  # only the turn call; compaction never ran
+
+
 async def test_loop_respects_interrupt_flag():
     provider = ScriptedProvider(["should not be called"])
     result = await run_turn(

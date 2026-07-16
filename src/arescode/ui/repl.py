@@ -19,13 +19,14 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from arescode.config import Config, save_last_model
-from arescode.core.context import load_system_prompt
+from arescode.core.context import assemble_system_prompt, compact_now
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
 from arescode.core.state import SessionState
 from arescode.permissions.gate import Gate
 from arescode.providers.ollama_admin import OllamaAdmin
 from arescode.providers.openai_compat import OpenAICompatProvider
+from arescode.repo.repomap import build_repo_map
 from arescode.tools.registry import Executor
 from arescode.ui import render
 from arescode.ui.approve import auto_approver, interactive_approver
@@ -39,6 +40,8 @@ Commands:
                    The chosen model is remembered as the default for the next launch.
   /verbose         toggle full tool output in the trace
   /stats           show edit telemetry for this session (grouped by model)
+  /map             show the repository map injected into the system prompt
+  /compact         summarize older history now to reclaim context budget
   /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
   /deny <cmd>      remove a bash command from the session allowlist
   /exit, /quit     leave AresCode
@@ -59,6 +62,8 @@ class Command:
     model_target: str | None = None  # /model <name> -> switch target (resolved by the REPL)
     toggle_verbose: bool = False  # set when /verbose is issued
     show_stats: bool = False  # set when /stats is issued
+    show_map: bool = False  # set when /map is issued
+    compact: bool = False  # set when /compact is issued (force a compaction now)
     show_allow: bool = False  # set when /allow is issued with no argument
     allow: str | None = None  # bash token to add to the session allowlist (/allow <cmd>)
     deny: str | None = None  # bash token to drop from the session allowlist (/deny <cmd>)
@@ -83,6 +88,10 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         return Command(action="continue", toggle_verbose=True)
     if name == "/stats":
         return Command(action="continue", show_stats=True)
+    if name == "/map":
+        return Command(action="continue", show_map=True)
+    if name == "/compact":
+        return Command(action="continue", compact=True)
     if name == "/allow":
         if not arg:
             return Command(action="continue", show_allow=True)
@@ -244,7 +253,10 @@ async def run(
     # a hard-deny backstop so a blocklisted command or path escape can never slip through.
     executor = Executor(project_dir, config, gate=gate)
     observer = render.ConsoleObserver(console, verbose=False)
-    system_prompt = load_system_prompt()
+    # Built once at session start and injected into the system prompt (context.md §4.5, TASKS 5.1);
+    # kept around so /map can redisplay it without a rescan.
+    repo_map = build_repo_map(project_dir)
+    system_prompt = assemble_system_prompt(project_dir, repo_map=repo_map)
     state = _load_session(project_dir, config, console, resume=resume)
 
     # Native admin client + switch lifecycle owner (D12). Isolated from the chat provider: the
@@ -296,6 +308,19 @@ async def run(
                 render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
             if command.show_stats:
                 render.note(console, executor.stats_report())
+            if command.show_map:
+                render.note(console, repo_map or "(repository map is empty)")
+            if command.compact:
+                result = await compact_now(state, provider=provider, num_ctx=config.num_ctx)
+                if result.compacted:
+                    render.note(
+                        console,
+                        f"compacted history: folded {result.folded} message(s) "
+                        f"(~{result.before_tokens}->{result.after_tokens} tokens)",
+                    )
+                    state.save(project_dir)
+                else:
+                    render.note(console, f"nothing to compact ({result.reason})")
             if command.show_allow:
                 render.note(console, gate.describe_allowlist())
             if command.allow:
@@ -321,6 +346,7 @@ async def run(
                 max_steps=config.max_steps,
                 gate=gate,
                 approver=approver,
+                num_ctx=config.num_ctx,
             )
         )
         # Block a model switch while a turn is in flight (context.md: REPL-idle only). Belt-and-

@@ -7,9 +7,9 @@ change you want, review the proposed file edits or shell commands, and keep the 
 own machine. It is designed around a small, reliable tool surface and a deny-first permission gate
 so weaker local models can still operate through a robust harness.
 
-> Status: early development. Phases 0-4 are complete: package/config, streaming REPL, tools and
-> loop, SEARCH/REPLACE editing, and the trust/permission layer. Phase 5 focuses on endurance:
-> compaction, project memory, and longer-session behavior.
+> Status: early development. Phases 0-5 are complete: package/config, streaming REPL, tools and
+> loop, SEARCH/REPLACE editing, the trust/permission layer, and the endurance layer (repo map,
+> `ARES.md` project memory, and token-budget compaction). Phase 6 is polish and packaging.
 
 ## Why AresCode
 
@@ -31,6 +31,7 @@ The project favors predictable behavior over a large feature surface:
 | Hard denials | Path escapes and dangerous command patterns are blocked before execution. |
 | Sessions | Save and resume prior conversations with `--resume`. |
 | Model switching | Switch installed Ollama models mid-session with `/model` (per-model context settings); your last choice is remembered as the default next launch. |
+| Context management | A repo map and optional `ARES.md` project memory are injected into the system prompt; long sessions are compacted at 75% of the token budget by summarizing the oldest history. |
 
 ## Quick Start
 
@@ -107,6 +108,8 @@ Common commands:
 | `/model [name]` | Pick or switch the active model. |
 | `/verbose` | Toggle full tool output in the trace. |
 | `/stats` | Show edit telemetry grouped by model. |
+| `/map` | Show the repository map injected into the system prompt. |
+| `/compact` | Summarize older history now to reclaim context budget. |
 | `/allow [cmd]` | View or add a session command allowlist entry. |
 | `/deny <cmd>` | Remove a command from the session allowlist. |
 | `/exit`, `/quit` | Leave AresCode. |
@@ -119,6 +122,21 @@ Input shortcuts:
 | Ctrl+J | Insert a newline. |
 | Ctrl+C | Cancel the current turn. |
 | Ctrl+D | Exit. |
+
+## Project memory
+
+Drop an `ARES.md` file in your project root to give AresCode durable, project-specific context
+(conventions, key commands, gotchas). It is loaded into the system prompt on every turn. Generate a
+starter template with:
+
+```powershell
+arescode init
+```
+
+AresCode also builds a gitignore-filtered **repo map** at session start so the model knows the
+project's shape without spending tool calls; view it any time with `/map`. As a session grows past
+75% of the context budget, the oldest history is summarized into a compact note (or force it with
+`/compact`) so long, multi-step tasks stay coherent on a small local model.
 
 ## Safety Model
 
@@ -196,6 +214,8 @@ The core implementation lives in:
 | REPL and slash commands | `src/arescode/ui/repl.py` |
 | Agent loop | `src/arescode/core/loop.py` |
 | Parser | `src/arescode/core/parser.py` |
+| Context (system prompt, budget, compaction) | `src/arescode/core/context.py` |
+| Repo map | `src/arescode/repo/repomap.py` |
 | Tool registry | `src/arescode/tools/registry.py` |
 | Edit engine | `src/arescode/tools/edit.py` |
 | Permission gate | `src/arescode/permissions/gate.py` |
@@ -234,10 +254,10 @@ Completed:
 - Phase 2: tool parser, tool registry, shell/search/file tools, agent loop
 - Phase 3: SEARCH/REPLACE editing with fallbacks and telemetry
 - Phase 4: deny-first permission gate with previews and hard denials
+- Phase 5: repo map, `ARES.md` project memory, token accounting, and summarizing compaction
 
 Next:
 
-- Phase 5: compaction, project memory, and stronger long-running session behavior
 - Phase 6: polish, packaging workflow, and additional operator ergonomics
 
 See [`docs/TASKS.md`](docs/TASKS.md) for the implementation plan.

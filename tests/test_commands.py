@@ -69,6 +69,16 @@ def test_verbose_command_toggles():
     assert command.toggle_verbose is True
 
 
+def test_map_command_requests_map():
+    command = parse_command("/map", SessionState.new("m"), _console())
+    assert command.show_map is True
+
+
+def test_compact_command_requests_compaction():
+    command = parse_command("/compact", SessionState.new("m"), _console())
+    assert command.compact is True
+
+
 def test_allow_without_arg_requests_listing():
     command = parse_command("/allow", SessionState.new("m"), _console())
     assert command.show_allow is True

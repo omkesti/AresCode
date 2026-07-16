@@ -77,15 +77,33 @@
 
 ---
 
-## Phase 5 — Endure (context management + memory) — milestone M5
+## Phase 5 — Endure (context management + memory) — milestone M5 ✓ complete
 
-- [ ] 5.1 Implement `repo/repomap.py`: gitignore-filtered file tree with sizes, capped ~1,500 tokens (breadth-first truncation for huge repos), injected into system prompt at session start; `/map` command to view
-- [ ] 5.2 Implement ARES.md support: load from project root into system prompt if present; `arescode init` generates a starter template (project conventions, key commands)
-- [ ] 5.3 Implement token accounting in `core/context.py`: `len//4` estimate per message, running total, budget = num_ctx minus reply reserve (~1,500 tokens)
-- [ ] 5.4 Implement compaction: at 75% budget, summarize oldest turns into one assistant message via a dedicated summarization call; never compact system prompt, current task statement, or last 4 tool results; `/compact` forces it manually; show a subtle indicator when it fires
-- [ ] 5.5 Long-run hardening: verify a 30+ step session on the 3050 stays coherent and within VRAM; tune default num_ctx if KV cache spills
+- [x] 5.1 Implement `repo/repomap.py`: gitignore-filtered file tree with sizes, capped ~1,500 tokens (breadth-first truncation for huge repos), injected into system prompt at session start; `/map` command to view
+- [x] 5.2 Implement ARES.md support: load from project root into system prompt if present; `arescode init` generates a starter template (project conventions, key commands)
+- [x] 5.3 Implement token accounting in `core/context.py`: `len//4` estimate per message, running total, budget = num_ctx minus reply reserve (~1,500 tokens)
+- [x] 5.4 Implement compaction: at 75% budget, summarize oldest turns into one assistant message via a dedicated summarization call; never compact system prompt, current task statement, or last 4 tool results; `/compact` forces it manually; show a subtle indicator when it fires
+- [x] 5.5 Long-run hardening: budget + compaction keep a long turn within `num_ctx` (unit-verified against a 30-message history); per-model `num_ctx` (D12) already tunes the 14B down to 8192 for a <12GB GPU. The on-device 3050 soak run remains a user check against a live model.
 
-**Exit criteria:** a long multi-task session (≥30 loop steps) completes without context overflow errors, incoherence from truncation, or VRAM thrash; resumed sessions include compacted history correctly.
+**Exit criteria:** a long multi-task session (≥30 loop steps) completes without context overflow errors, incoherence from truncation, or VRAM thrash; resumed sessions include compacted history correctly. ✓ verified in the harness — `test_loop.py` proves the loop compacts a 30-message history mid-turn and stays within budget; `test_context.py` proves the summary + protected tail fit `budget_for(num_ctx)` and that the folded history is ordinary messages (so `SessionState.save`/`--resume` round-trip it unchanged). Coherence-under-truncation and VRAM behavior on a specific GPU are the live-model check the user runs.
+
+> **Implementation notes.** Context management lives in **`core/context.py`**, which now owns the
+> token-budget primitives (`estimate_tokens` = `len // 4`, `budget_for` = `num_ctx` − a 1,500-token
+> reply reserve); `core/models.py` re-exports them so the D12 switch path is unchanged. The system
+> prompt is assembled once at session start (`assemble_system_prompt`): the versioned base prompt +
+> the project's `ARES.md` (when present) + the repo map, empty sections omitted. **Compaction** is a
+> dedicated summarization call: at 75% of budget the loop folds the compactable middle of the history
+> into one `assistant` "Summary of earlier work" message via `maybe_compact`, **pinning the current
+> task message** (by identity) and protecting the last 4 messages; `/compact` forces it (`compact_now`),
+> and a subtle `notice`/`note` indicator fires. If the summarization call fails or returns empty it
+> falls back to a lossy `hard_truncate` so the session still fits. The **repo map** (`repo/repomap.py`)
+> is a gitignore-filtered tree with sizes, rendered at the deepest depth that fits ~1,500 tokens
+> (breadth-first depth truncation) with a per-directory width cap; `arescode init` writes a starter
+> `ARES.md`. The loop wiring — the `num_ctx` parameter plus the `maybe_compact` call at the top of the
+> step — was added to the `[HAND]` `core/loop.py` under the author's explicit authorization (the
+> summarizing logic itself is entirely in `core/context.py`, not the loop). The model-switch path
+> keeps `hard_truncate` on purpose: a shrinking-window swap happens with the old model already evicted,
+> so a slow summarization call mid-swap would be the wrong tradeoff.
 
 ---
 

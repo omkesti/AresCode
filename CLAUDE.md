@@ -15,20 +15,23 @@ captures what actively shapes day-to-day work.
 
 ## Status
 
-- **Phases 0–4 are complete and verified** (M1 Talk, M2 Act, M3 Edit, M4 Trust).
-- Working today: layered config (incl. a **remembered model default** — D13), the CLI entry point,
-  an OpenAI-compatible **streaming provider**
+- **Phases 0–5 are complete and verified** (M1 Talk, M2 Act, M3 Edit, M4 Trust, M5 Endure).
+- Working today: layered config (incl. a **remembered model default** — D13), the CLI entry point
+  (`arescode`, plus `arescode init`), an OpenAI-compatible **streaming provider**
   over Ollama, an interactive **REPL** (slash commands, live markdown), **session save/resume**,
   the **lenient parser + read-only tools + master loop**, the **SEARCH/REPLACE edit cascade**
-  (retry + whole-file fallback + telemetry), and the **deny-first permission gate** (auto-allow
+  (retry + whole-file fallback + telemetry), the **deny-first permission gate** (auto-allow
   reads, ask-with-preview for writes/shell, hard-deny path escapes + a command blocklist, session
-  & persistent allowlists, `/allow` `/deny`, and `--yolo`).
-- **Next is Phase 5 (Endure)** — repo map, `ARES.md` memory, token-budget compaction.
+  & persistent allowlists, `/allow` `/deny`, and `--yolo`), and the **endurance layer** — a
+  gitignore-filtered **repo map** (`/map`), **`ARES.md`** project memory injected into the system
+  prompt, token accounting, and **summarizing compaction** at 75% budget (`/compact`).
+- **Next is Phase 6 (Polish)** — remaining slash commands, first-run experience, error-path sweep,
+  packaging, and the dogfood gauntlet.
 
 Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
-`core/loop.py`, `core/context.py` (system-prompt loader only), `tools/*`, `permissions/gate.py`,
-`ui/repl.py`, `ui/render.py`, `ui/approve.py`. Still a **docstring-only stub** awaiting its phase:
-`repo/repomap.py` (Phase 5); `core/context.py` gains repo map + compaction in Phase 5.
+`core/loop.py`, `core/context.py` (system-prompt assembly + token budget + compaction),
+`core/models.py`, `repo/repomap.py`, `tools/*`, `permissions/gate.py`, `ui/repl.py`,
+`ui/render.py`, `ui/approve.py`, `ui/model_select.py`. No stub modules remain.
 
 ## Commands
 
@@ -117,6 +120,6 @@ without removing the reason the floor exists.
 
 M1 Talk ✓ → M2 Act ✓ (parser `[HAND]` + read-only tools + loop `[HAND]`) → M3 Edit ✓
 (SEARCH/REPLACE cascade `[HAND]` + retry + whole-file fallback; the make-or-break milestone) →
-M4 Trust ✓ (gate) → **M5 Endure** (compaction, ARES.md, repo map) → M6 Polish. Each phase ships
+M4 Trust ✓ (gate) → M5 Endure ✓ (compaction, ARES.md, repo map) → **M6 Polish**. Each phase ships
 usable and adds tests before its exit check; don't start the next phase until the current one
 passes on a real repo.
