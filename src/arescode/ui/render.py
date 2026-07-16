@@ -12,27 +12,65 @@ from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from typing import Any
 
+from rich import box
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
 from arescode.providers.base import ModelProvider, WireMessage
 from arescode.tools.registry import Action, ToolResult, action_summary
+from arescode.ui import theme
 
 # Lines of tool output shown inline when not in /verbose mode. Enough to see a short file
 # list or the head of a read, without flooding the trace; /verbose shows everything.
 PREVIEW_LINES = 12
 
+# The welcome screen's numbered notes: (heading, detail) — same shape as Claude Code's
+# "Security notes" block. Keep it to three items so the banner stays one screen tall.
+_NOTES: tuple[tuple[str, str], ...] = (
+    (
+        "AresCode runs fully local (Ollama)",
+        "Responses come from a small local model; expect rough edges.",
+    ),
+    (
+        "AresCode can make mistakes",
+        "Always review edits, diffs, and commands before approving them.",
+    ),
+    (
+        "Enter sends - Ctrl+J newline - Ctrl+C cancel - Ctrl+D quit",
+        "Run /help at any time to list all slash commands.",
+    ),
+)
+
 
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
-    console.print(f"[bold]AresCode[/bold]  model=[cyan]{model}[/cyan]  num_ctx={num_ctx}")
-    console.print(f"[dim]project: {project_dir}[/dim]")
-    console.print(
-        "[dim]Enter to send - Ctrl+J for a newline - /help for commands - Ctrl+D to quit[/dim]"
+    """The Claude Code-style welcome screen: boxed greeting, wordmark, session info, notes."""
+    console.print()
+    greeting = Text.from_markup(
+        f"[{theme.PRIMARY}]✳[/] Welcome to [bold]AresCode[/bold]!"
     )
+    console.print(Panel(greeting, box=box.ROUNDED, border_style=theme.PRIMARY,
+                        expand=False, padding=(0, 1)))
+    console.print()
+    for line in theme.logo_lines():
+        console.print(line)
+    console.print()
+    console.print(
+        f"  model: [{theme.PRIMARY_LIGHT}]{model}[/]  [dim]num_ctx={num_ctx}[/dim]"
+    )
+    console.print(f"  [dim]project: {project_dir}[/dim]")
+    console.print()
+    console.print("  [bold]Notes:[/bold]")
+    console.print()
+    for i, (heading, detail) in enumerate(_NOTES, 1):
+        console.print(f"  [bold]{i}. {heading}[/bold]")
+        console.print(f"     [dim]{detail}[/dim]")
+    console.print()
+    console.print(f"  [{theme.PRIMARY_LIGHT}]Type a request and press Enter to begin...[/]")
 
 
 def note(console: Console, message: str) -> None:
@@ -75,7 +113,9 @@ class ConsoleObserver:
         self.verbose = verbose
 
     def thinking(self) -> AbstractContextManager:
-        return self.console.status("[dim]thinking...[/dim]", spinner="dots")
+        return self.console.status(
+            f"[{theme.PRIMARY}]✳[/] [dim]thinking...[/dim]", spinner="dots"
+        )
 
     def assistant_text(self, text: str) -> None:
         # The model's between-step reasoning; shown dimmed so tool traces stand out.
@@ -83,7 +123,8 @@ class ConsoleObserver:
 
     def tool_start(self, action: Action) -> None:
         self.console.print(
-            f"[cyan]>[/cyan] [bold]{action.tool}[/bold] [dim]{escape(action_summary(action))}[/dim]"
+            f"[{theme.PRIMARY}]●[/] [bold]{action.tool}[/bold] "
+            f"[dim]{escape(action_summary(action))}[/dim]"
         )
 
     def tool_end(self, action: Action, result: ToolResult, duration: float) -> None:
@@ -125,7 +166,7 @@ class ConsoleObserver:
             elif line.startswith("-"):
                 style = "red"
             elif line.startswith("@@"):
-                style = "cyan"
+                style = theme.PRIMARY_LIGHT
             else:
                 style = "dim"
             self.console.print(Text(line, style=style))

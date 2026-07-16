@@ -19,6 +19,7 @@ from rich.text import Text
 
 from arescode.permissions.gate import Approval, Approver, Verdict
 from arescode.tools.registry import Action, action_summary
+from arescode.ui import theme
 
 PREVIEW_LINES = 12
 _MENU_HINT = "up/down to move, Enter to select, Esc to cancel"
@@ -73,7 +74,7 @@ def _build_options(action: Action, verdict: Verdict) -> list[tuple[str, Approval
 def _render_request(console: Console, action: Action, verdict: Verdict, preview: str) -> None:
     # escape() so a path/command containing [] is never mistaken for rich markup.
     console.print(
-        f"[yellow]permission needed[/yellow] [bold]{escape(action.tool)}[/bold] "
+        f"[{theme.PRIMARY_LIGHT}]permission needed[/] [bold]{escape(action.tool)}[/bold] "
         f"[dim]{escape(action_summary(action))}[/dim]"
     )
     if preview:
@@ -114,7 +115,7 @@ def _render_menu(options: list[tuple[str, Approval]], idx: int) -> Group:
     rows: list[Text] = []
     for i, (label, _) in enumerate(options):
         if i == idx:
-            rows.append(Text(f"> {label}", style="bold cyan"))
+            rows.append(Text(f"> {label}", style=theme.ACCENT_BOLD))
         else:
             rows.append(Text(f"  {label}", style="dim"))
     rows.append(Text(f"  [{_MENU_HINT}]", style="dim"))
@@ -237,7 +238,7 @@ def _render_diff(console: Console, diff: str) -> None:
         elif line.startswith("-"):
             style = "red"
         elif line.startswith("@@"):
-            style = "cyan"
+            style = theme.PRIMARY_LIGHT
         else:
             style = "dim"
         console.print(Text("  " + line, style=style))

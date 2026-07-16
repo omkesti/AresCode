@@ -15,7 +15,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from arescode.providers.ollama_admin import InstalledModel
-from arescode.ui import render
+from arescode.ui import render, theme
 
 
 def resolve_choice(raw: str, installed_names: list[str]) -> str | None:
@@ -68,7 +68,9 @@ async def pick_model(
         badge = f"  [green]({', '.join(marks)})[/green]" if marks else ""
         size = f"{m.size_gb:.1f}GB" if m.size else "?"
         quant = f" {m.quantization}" if m.quantization else ""
-        console.print(f"  [cyan]{i:>2}[/cyan]. {m.name}  [dim]{size}{quant}[/dim]{badge}")
+        console.print(
+            f"  [{theme.PRIMARY}]{i:>2}[/]. {m.name}  [dim]{size}{quant}[/dim]{badge}"
+        )
 
     raw = await _read_line(console, "select> ", bindings=_cancel_bindings())
     if raw is None:

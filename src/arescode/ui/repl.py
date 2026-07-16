@@ -28,9 +28,13 @@ from arescode.providers.ollama_admin import AdminUnavailable, ModelLoadError, Ol
 from arescode.providers.openai_compat import OpenAICompatProvider
 from arescode.repo.repomap import build_repo_map
 from arescode.tools.registry import Executor
-from arescode.ui import render
+from arescode.ui import render, theme
 from arescode.ui.approve import auto_approver, interactive_approver
 from arescode.ui.model_select import free_text_model, pick_model
+
+# The input prompt, Claude Code-style: a bare '>' in the brand purple. prompt_toolkit
+# formatted-text tuples, since rich markup means nothing to PromptSession.
+PROMPT_MESSAGE = [("", "\n"), (f"fg:{theme.PRIMARY} bold", "> ")]
 
 HELP_TEXT = """\
 Commands:
@@ -270,7 +274,7 @@ async def _switch_model(
     # default, so a config-file `model` or `--model` flag still wins next time.
     save_last_model(result.model)
     console.print(
-        f"[bold cyan]{result.model}[/bold cyan]  num_ctx={result.num_ctx}  "
+        f"[{theme.ACCENT_BOLD}]{result.model}[/]  num_ctx={result.num_ctx}  "
         f"context {result.context_pct:.0f}% used"
     )
     return config, provider
@@ -318,7 +322,7 @@ async def run(
 
     while True:
         try:
-            user_input = await prompt_session.prompt_async("\nyou> ")
+            user_input = await prompt_session.prompt_async(PROMPT_MESSAGE)
         except EOFError:  # Ctrl+D
             break
         except KeyboardInterrupt:  # Ctrl+C at an empty prompt
