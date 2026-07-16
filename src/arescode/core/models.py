@@ -29,7 +29,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from arescode.core.context import budget_for, estimate_tokens, hard_truncate
-from arescode.providers.ollama_admin import AdminUnavailable, InstalledModel, OllamaAdmin
+from arescode.providers.ollama_admin import (
+    AdminUnavailable,
+    InstalledModel,
+    ModelLoadError,
+    OllamaAdmin,
+)
 
 if TYPE_CHECKING:
     from arescode.config import Config
@@ -146,6 +151,17 @@ class ModelManager:
         except AdminUnavailable:
             return set()
 
+    # --- startup verification --------------------------------------------
+    async def verify_loads(self, model: str) -> float:
+        """Force ``model`` resident to confirm it actually loads; return wall-clock load seconds.
+
+        Raises :class:`ModelLoadError` if the model can't load (e.g. too large for VRAM) and
+        :class:`AdminUnavailable` if the native API can't be reached (can't verify → caller trusts
+        it and loads lazily). Used at startup to self-heal a poisoned remembered default (D13).
+        """
+        effective = self._base.for_model(model)
+        return await self.admin.warmup(model, num_ctx=effective.num_ctx)
+
     # --- the switch -------------------------------------------------------
     async def switch(
         self,
@@ -201,6 +217,19 @@ class ModelManager:
             progress(f"loading {target}...")
             try:
                 load_seconds = await self.admin.warmup(target, num_ctx=effective.num_ctx)
+            except ModelLoadError as exc:
+                # The model actively failed to load (e.g. too large for VRAM). Abort the switch and
+                # stay on the current model — crucially, ok=False keeps the REPL from persisting a
+                # model that can't run (D13). The current model was evicted above, but Ollama
+                # reloads it on demand, so `state.model` is still valid and untouched.
+                return SwitchResult(
+                    False, target, effective.num_ctx, effective,
+                    error=(
+                        f"{target} failed to load; staying on {current or 'the current model'}. "
+                        f"This usually means it needs more VRAM than is free right now. "
+                        f"Details: {exc}"
+                    ),
+                )
             except AdminUnavailable:
                 warnings.append(f"could not preload {target}; it will load on first use")
             except Exception as exc:  # noqa: BLE001 - best-effort; keep going

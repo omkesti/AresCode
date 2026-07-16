@@ -29,6 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field
 GLOBAL_CONFIG_PATH = Path.home() / ".arescode" / "config.toml"
 PROJECT_CONFIG_NAME = ".arescode.toml"
 
+# The out-of-the-box, low-VRAM-safe default (D13). Named once here so the ``Config.model`` field
+# default and the poisoned-remembered-default self-heal (repl `_activate_model`) can't drift apart.
+BUILTIN_DEFAULT_MODEL = "qwen2.5-coder:7b"
+
 # Machine-managed "last model the user switched to" (D13). Kept separate from the hand-edited
 # config.toml so remembering a choice never rewrites a user's comments/formatting.
 LAST_MODEL_PATH = Path.home() / ".arescode" / "last_model"
@@ -62,8 +66,9 @@ class Config(BaseModel):
     # The out-of-the-box default is the light 7B tag so a first run works on a low-VRAM box (D13).
     # The stronger `qwen2.5-coder:14b-instruct` (D11) is one `/model` switch away, and that choice
     # is remembered (LAST_MODEL_PATH) so it becomes the default from the next launch on. Either way
-    # the harness is unchanged — robustness is not a 7B workaround.
-    model: str = Field(default="qwen2.5-coder:7b", description="Ollama model tag to run.")
+    # the harness is unchanged — robustness is not a 7B workaround. It also doubles as the safe
+    # harbor a poisoned remembered default self-heals back to (see repl `_activate_model`).
+    model: str = Field(default=BUILTIN_DEFAULT_MODEL, description="Ollama model tag to run.")
     base_url: str = Field(
         default="http://localhost:11434/v1",
         description="OpenAI-compatible endpoint base URL.",

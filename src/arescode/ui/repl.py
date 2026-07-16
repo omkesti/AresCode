@@ -18,13 +18,13 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
-from arescode.config import Config, save_last_model
+from arescode.config import BUILTIN_DEFAULT_MODEL, Config, read_last_model, save_last_model
 from arescode.core.context import assemble_system_prompt, compact_now
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
 from arescode.core.state import SessionState
 from arescode.permissions.gate import Gate
-from arescode.providers.ollama_admin import OllamaAdmin
+from arescode.providers.ollama_admin import AdminUnavailable, ModelLoadError, OllamaAdmin
 from arescode.providers.openai_compat import OpenAICompatProvider
 from arescode.repo.repomap import build_repo_map
 from arescode.tools.registry import Executor
@@ -177,8 +177,42 @@ async def _activate_model(
                 f"falling back to {base_config.model}",
             )
             active = base_config.model
+    active = await _verify_remembered_or_fallback(manager, active, console)
     state.model = active
     return manager.effective_config(active)
+
+
+async def _verify_remembered_or_fallback(
+    manager: ModelManager, active: str, console: Console
+) -> str:
+    """Self-heal a poisoned remembered default (D13): if we're about to launch on a machine-
+    remembered model, verify it actually loads; if it can't (e.g. too large for VRAM, crashing
+    the backend), fall back to the built-in default and forget the remembered choice.
+
+    Scoped to exactly the self-poisoning case — a ``/model`` switch persists the choice, so a model
+    that crashes on load would otherwise take down the first turn on *every* future launch. A model
+    chosen explicitly (``--model`` / config / a resumed session) is left alone: that's the user's
+    call, and there is nothing persisted to un-poison.
+    """
+    if read_last_model() != active:
+        return active  # not the remembered default -> not our self-poisoning case
+    if active == BUILTIN_DEFAULT_MODEL:
+        return active  # already the safe harbor; nothing safer to fall back to
+    try:
+        render.note(console, f"verifying {active} loads...")
+        await manager.verify_loads(active)
+    except ModelLoadError as exc:
+        render.error(console, f"{active} failed to load: {exc}")
+        render.note(
+            console,
+            f"falling back to {BUILTIN_DEFAULT_MODEL} and forgetting the remembered default "
+            f"(switch back with /model once there is enough free VRAM).",
+        )
+        save_last_model(BUILTIN_DEFAULT_MODEL)
+        return BUILTIN_DEFAULT_MODEL
+    except AdminUnavailable:
+        pass  # can't verify without the native API — trust it and let it load lazily, as before
+    return active
 
 
 async def _switch_model(
