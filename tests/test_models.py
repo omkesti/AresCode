@@ -18,7 +18,12 @@ from arescode.core.models import (
     match_model,
 )
 from arescode.core.state import SessionState
-from arescode.providers.ollama_admin import AdminUnavailable, InstalledModel, LoadedModel
+from arescode.providers.ollama_admin import (
+    AdminUnavailable,
+    InstalledModel,
+    LoadedModel,
+    ModelLoadError,
+)
 from arescode.tools.registry import Executor
 
 M7B = "qwen2.5-coder:7b"
@@ -237,6 +242,41 @@ async def test_switch_rejected_mid_turn():
     assert "mid-task" in result.error
     assert admin.calls == []
     assert state.model == M7B
+
+
+async def test_switch_aborts_and_stays_when_target_fails_to_load():
+    # A ModelLoadError from warmup (e.g. the target is too large for VRAM) must fail the switch and
+    # leave the working model active, so the REPL never persists a model that can't run (D13).
+    admin = FakeAdmin()
+
+    async def crash(model: str, *, num_ctx=None):
+        raise ModelLoadError(f"{model} failed to load: CUDA error: shared object init failed")
+
+    admin.warmup = crash  # type: ignore[assignment]
+    manager = ModelManager(_config(), admin)
+    state = _state(M7B)
+
+    result = await manager.switch(state, M14B)
+
+    assert not result.ok
+    assert "failed to load" in result.error
+    assert "staying on qwen2.5-coder:7b" in result.error
+    assert state.model == M7B  # unchanged — the working model stays active
+    notes = [m.content for m in state.messages if m.role == "system"]
+    assert not any("model switched" in n for n in notes)  # no switch note appended
+
+
+async def test_verify_loads_propagates_model_load_error():
+    admin = FakeAdmin()
+
+    async def crash(model: str, *, num_ctx=None):
+        raise ModelLoadError("boom")
+
+    admin.warmup = crash  # type: ignore[assignment]
+    manager = ModelManager(_config(), admin)
+
+    with pytest.raises(ModelLoadError):
+        await manager.verify_loads(M14B)
 
 
 async def test_unload_failure_never_aborts_switch():

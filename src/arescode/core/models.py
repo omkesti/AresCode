@@ -14,10 +14,12 @@ The chat path is untouched (still OpenAI-compat); everything native goes through
 :class:`~arescode.providers.ollama_admin.OllamaAdmin`. When that admin is unavailable the switch
 *degrades*: it changes the model name only, and unload/warmup/compaction-by-VRAM become no-ops.
 
-Compaction note: Phase 5's summarizing compaction (TASKS 5.4) is not built yet, so when the new,
-smaller window can't hold the history this module falls back to :func:`hard_truncate` — dropping
-the oldest whole messages with a visible warning. That is a deliberate stopgap; the ``compact``
-seam lets Phase 5 replace it with real summarization without touching this file's callers.
+Compaction note: the *loop's* summarizing compaction lives in :mod:`arescode.core.context`
+(TASKS 5.4). This switch path deliberately uses the faster ``hard_truncate`` from that module
+instead — a shrinking-window swap happens with the old model already evicted and the new one just
+warmed, so making a slow summarization call mid-swap would be the wrong tradeoff. Dropping the
+oldest whole messages with a visible warning keeps the switch snappy; the ``compact`` seam remains
+if a caller ever wants to inject summarization here.
 """
 
 from __future__ import annotations
@@ -26,50 +28,29 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from arescode.providers.ollama_admin import AdminUnavailable, InstalledModel, OllamaAdmin
+from arescode.core.context import budget_for, estimate_tokens, hard_truncate
+from arescode.providers.ollama_admin import (
+    AdminUnavailable,
+    InstalledModel,
+    ModelLoadError,
+    OllamaAdmin,
+)
 
 if TYPE_CHECKING:
     from arescode.config import Config
     from arescode.core.state import Message, SessionState
     from arescode.tools.registry import Executor
 
-# Tokens held back from the window for the model's own reply (context.md §4.5).
-REPLY_RESERVE_TOKENS = 1500
+# Token-budget primitives live in core/context.py (their canonical home, TASKS 5.3); re-exported
+# here so the switch path and its tests keep importing them from ``arescode.core.models``.
+__all__ = ["ModelManager", "ModelMatch", "SwitchResult", "budget_for", "estimate_tokens",
+           "hard_truncate", "match_model"]
 
 # Sentinel: "fetch the installed list yourself". Distinct from None ("admin unavailable").
 _UNSET: object = object()
 
 ProgressFn = Callable[[str], None]
 CompactFn = Callable[["list[Message]", int], int]
-
-
-# ---------------------------------------------------------------------------
-# Token budget + stopgap compaction (Phase 5 will replace hard_truncate)
-# ---------------------------------------------------------------------------
-
-
-def estimate_tokens(messages: list[Message]) -> int:
-    """Rough token count over a message list (``len // 4``, per context.md §4.5)."""
-    return sum(len(m.content) // 4 for m in messages)
-
-
-def budget_for(num_ctx: int, reserve: int = REPLY_RESERVE_TOKENS) -> int:
-    """Usable history budget = context window minus the reply reserve."""
-    return max(1, num_ctx - reserve)
-
-
-def hard_truncate(messages: list[Message], budget: int, *, keep_last: int = 4) -> int:
-    """Drop oldest whole messages until the history fits ``budget``; returns how many were removed.
-
-    TODO(TASKS 5.4): this is a lossy stopgap for the not-yet-built Phase 5 compaction. Replace it
-    with a summarizing pass that folds the oldest turns into one assistant summary rather than
-    discarding them. ``keep_last`` protects the most recent turns (the live task + recent results).
-    """
-    removed = 0
-    while len(messages) > keep_last and estimate_tokens(messages) > budget:
-        del messages[0]
-        removed += 1
-    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +151,17 @@ class ModelManager:
         except AdminUnavailable:
             return set()
 
+    # --- startup verification --------------------------------------------
+    async def verify_loads(self, model: str) -> float:
+        """Force ``model`` resident to confirm it actually loads; return wall-clock load seconds.
+
+        Raises :class:`ModelLoadError` if the model can't load (e.g. too large for VRAM) and
+        :class:`AdminUnavailable` if the native API can't be reached (can't verify → caller trusts
+        it and loads lazily). Used at startup to self-heal a poisoned remembered default (D13).
+        """
+        effective = self._base.for_model(model)
+        return await self.admin.warmup(model, num_ctx=effective.num_ctx)
+
     # --- the switch -------------------------------------------------------
     async def switch(
         self,
@@ -225,6 +217,19 @@ class ModelManager:
             progress(f"loading {target}...")
             try:
                 load_seconds = await self.admin.warmup(target, num_ctx=effective.num_ctx)
+            except ModelLoadError as exc:
+                # The model actively failed to load (e.g. too large for VRAM). Abort the switch and
+                # stay on the current model — crucially, ok=False keeps the REPL from persisting a
+                # model that can't run (D13). The current model was evicted above, but Ollama
+                # reloads it on demand, so `state.model` is still valid and untouched.
+                return SwitchResult(
+                    False, target, effective.num_ctx, effective,
+                    error=(
+                        f"{target} failed to load; staying on {current or 'the current model'}. "
+                        f"This usually means it needs more VRAM than is free right now. "
+                        f"Details: {exc}"
+                    ),
+                )
             except AdminUnavailable:
                 warnings.append(f"could not preload {target}; it will load on first use")
             except Exception as exc:  # noqa: BLE001 - best-effort; keep going
@@ -244,7 +249,7 @@ class ModelManager:
             if removed:
                 warnings.append(
                     f"history exceeded the new {effective.num_ctx}-token window; dropped the "
-                    f"{removed} oldest message(s) [stopgap - TASKS 5.4 will summarize instead]"
+                    f"{removed} oldest message(s) to fit"
                 )
 
         pct = 100.0 * estimate_tokens(state.messages) / effective.num_ctx

@@ -11,7 +11,12 @@ from arescode import config as config_module
 from arescode.config import Config, ModelSettings
 from arescode.core.models import ModelManager
 from arescode.core.state import SessionState
-from arescode.providers.ollama_admin import AdminUnavailable, InstalledModel, LoadedModel
+from arescode.providers.ollama_admin import (
+    AdminUnavailable,
+    InstalledModel,
+    LoadedModel,
+    ModelLoadError,
+)
 from arescode.tools.registry import Executor
 from arescode.ui.repl import _activate_model, _switch_model
 
@@ -94,6 +99,77 @@ async def test_resume_with_admin_offline_keeps_recorded_model():
     # Can't validate without the admin API, so trust the recorded model rather than crash.
     assert state.model == "some:tag"
     assert cfg.model == "some:tag"
+
+
+# --- startup self-heal of a poisoned remembered default (D13) --------------
+
+
+async def test_activate_self_heals_poisoned_remembered_default():
+    # last_model points at 14b, which crashes on load -> fall back to 7b AND forget the poison.
+    config_module.save_last_model(M14B)
+    admin = FakeAdmin()
+
+    async def crash(model, *, num_ctx=None):
+        raise ModelLoadError("CUDA error: shared object initialization failed")
+
+    admin.warmup = crash  # type: ignore[assignment]
+    manager = _manager(admin)
+    state = SessionState.new(M14B)
+
+    cfg = await _activate_model(manager, state, _config(), _console(), resume=False)
+
+    assert cfg.model == M7B  # fell back to the safe built-in default
+    assert state.model == M7B
+    assert config_module.read_last_model() == M7B  # remembered default rewritten so it self-heals
+
+
+async def test_activate_keeps_remembered_default_that_loads():
+    config_module.save_last_model(M14B)
+    admin = FakeAdmin()  # warmup succeeds
+    manager = _manager(admin)
+    state = SessionState.new(M14B)
+
+    cfg = await _activate_model(manager, state, _config(), _console(), resume=False)
+
+    assert cfg.model == M14B and cfg.num_ctx == 8192
+    assert ("warmup", M14B) in admin.calls  # it was verified to load
+    assert config_module.read_last_model() == M14B  # left untouched
+
+
+async def test_activate_does_not_verify_a_non_remembered_model():
+    # No remembered default -> the active model came from config/default/session, not a /model
+    # switch; there is nothing to self-heal, so skip the eager verification entirely.
+    admin = FakeAdmin()
+    manager = _manager(admin)
+    state = SessionState.new(M14B)
+
+    await _activate_model(manager, state, _config(), _console(), resume=False)
+
+    assert admin.calls == []  # never warmed up
+
+
+async def test_activate_does_not_verify_when_remembered_is_the_safe_default():
+    # If the remembered default already is the safe harbor, there's nothing safer to fall back to.
+    config_module.save_last_model(M7B)
+    admin = FakeAdmin()
+    manager = _manager(admin)
+    state = SessionState.new(M7B)
+
+    await _activate_model(manager, state, _config(), _console(), resume=False)
+
+    assert admin.calls == []
+
+
+async def test_activate_trusts_remembered_model_when_admin_offline():
+    # Can't verify without the native API -> keep the remembered model, load lazily as before.
+    config_module.save_last_model(M14B)
+    manager = _manager(FakeAdmin(available=False))
+    state = SessionState.new(M14B)
+
+    cfg = await _activate_model(manager, state, _config(), _console(), resume=False)
+
+    assert cfg.model == M14B
+    assert config_module.read_last_model() == M14B  # not forgotten on an unverifiable launch
 
 
 # --- /model <name> switch path ---------------------------------------------

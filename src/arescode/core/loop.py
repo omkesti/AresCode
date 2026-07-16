@@ -9,7 +9,9 @@ Guards: a hard step cap, an interrupt flag checked between steps, and duplicate-
 file forever" pathology of weak models (context.md §4.1, TASKS 2.6).
 
 Authored under an explicit user override of decision D10 for Phase 2. The Phase 4 permission-gate
-wiring (``_permit`` plus the ``gate`` / ``approver`` parameters, per context.md §4.6) was added by
+wiring (``_permit`` plus the ``gate`` / ``approver`` parameters, per context.md §4.6) and the
+Phase 5 compaction hook (the ``num_ctx`` parameter plus the ``maybe_compact`` call at the top of the
+step — the summarizing logic itself lives in ``core/context.py``, per context.md §4.5) were added by
 Claude Code under the author's explicit authorization to modify ``[HAND]`` files.
 """
 
@@ -21,6 +23,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from typing import TYPE_CHECKING, Protocol
 
+from arescode.core.context import maybe_compact
 from arescode.core.parser import parse
 from arescode.core.state import SessionState
 from arescode.permissions.gate import Approval, Decision
@@ -165,10 +168,15 @@ async def run_turn(
     should_interrupt: Callable[[], bool] = lambda: False,
     gate: Gate | None = None,
     approver: Approver | None = None,
+    num_ctx: int | None = None,
 ) -> str:
-    """Drive one user turn to completion; returns the model's final plain-text answer."""
+    """Drive one user turn to completion; returns the model's final plain-text answer.
+
+    When ``num_ctx`` is given, the history is compacted at the top of each step once it crosses the
+    budget threshold (context.md §4.5); the current task message is pinned so it is never folded.
+    """
     obs = observer or NullObserver()
-    state.user(user_msg)
+    task_msg = state.user(user_msg)
     last_action: Action | None = None
     executed: dict[Action, int] = {}  # per-turn execution counts, for cycle detection
     wants_change = _wants_file_change(user_msg)
@@ -180,6 +188,18 @@ async def run_turn(
         if should_interrupt():
             obs.notice("interrupted by user")
             return "Interrupted by user."
+
+        # Keep the context within budget as a long turn accumulates tool results (context.md §4.5).
+        # The task message is pinned so the model never loses sight of what it was asked to do.
+        if num_ctx is not None:
+            compaction = await maybe_compact(
+                state, provider=provider, num_ctx=num_ctx, pin=task_msg
+            )
+            if compaction.compacted:
+                obs.notice(
+                    f"compacted history "
+                    f"(~{compaction.before_tokens}->{compaction.after_tokens} tokens)"
+                )
 
         messages = [{"role": "system", "content": system_prompt}, *state.to_wire()]
         try:

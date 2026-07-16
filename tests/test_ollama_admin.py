@@ -14,6 +14,7 @@ import pytest
 from arescode.config import Config
 from arescode.providers.ollama_admin import (
     AdminUnavailable,
+    ModelLoadError,
     OllamaAdmin,
     native_root,
 )
@@ -126,3 +127,38 @@ async def test_connect_error_becomes_admin_unavailable():
 
     with pytest.raises(AdminUnavailable):
         await _admin(handler).list_loaded()
+
+
+async def test_error_response_carries_status_code():
+    def handler(request):
+        return httpx.Response(500, text="boom")
+
+    with pytest.raises(AdminUnavailable) as excinfo:
+        await _admin(handler).list_installed()
+    assert excinfo.value.status == 500  # so callers can tell a 5xx from an absent endpoint
+
+
+# --- warmup: a load-time crash is a ModelLoadError, not "admin unavailable" -----------------
+
+
+async def test_warmup_5xx_becomes_model_load_error():
+    # This is exactly the reported failure: a too-large model crashes llama-server, Ollama returns
+    # HTTP 500 with a CUDA message. That must surface as a hard load failure, carrying the detail.
+    crash = '{"error":{"message":"llama-server terminated: CUDA error: shared object init failed"}}'
+
+    def handler(request):
+        return httpx.Response(500, text=crash)
+
+    with pytest.raises(ModelLoadError) as excinfo:
+        await _admin(handler).warmup("qwen2.5-coder:14b-instruct", num_ctx=8192)
+    assert "CUDA error" in str(excinfo.value)  # backend's own message is preserved
+
+
+async def test_warmup_404_stays_admin_unavailable():
+    # A 404 (absent endpoint / non-Ollama backend) is degrade-gracefully, not a load failure.
+    def handler(request):
+        return httpx.Response(404, text="not found")
+
+    with pytest.raises(AdminUnavailable) as excinfo:
+        await _admin(handler).warmup("qwen2.5-coder:14b-instruct", num_ctx=8192)
+    assert not isinstance(excinfo.value, ModelLoadError)

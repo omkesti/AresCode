@@ -34,7 +34,25 @@ _WARM_KEEP_ALIVE = "30m"
 
 
 class AdminUnavailable(RuntimeError):
-    """The native Ollama admin API is unreachable or absent (e.g. a non-Ollama backend)."""
+    """The native Ollama admin API is unreachable or absent (e.g. a non-Ollama backend).
+
+    ``status`` carries the HTTP status when the failure was a response code (else ``None`` for a
+    connection-level error), so callers can tell an absent endpoint (404) from a server-side
+    failure (5xx) without re-parsing the message.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class ModelLoadError(RuntimeError):
+    """A model actively failed to *load* (e.g. too large for available VRAM, crashing the backend).
+
+    Distinct from :class:`AdminUnavailable`: the admin API answered, but the load call it made
+    returned a server error. Callers must treat this as a hard failure — never degrade to "it will
+    load on first use", and never persist a model that can't run (D13 self-heal).
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,9 +130,14 @@ class OllamaAdmin:
                 f"Ollama admin API unreachable at {self.native_url}{path}: {exc}"
             ) from exc
         if resp.status_code >= 400:
-            # 404 == endpoint absent (non-Ollama backend); anything else is still best-effort.
+            # 404 == endpoint absent (non-Ollama backend); a 5xx is a real server-side failure
+            # (e.g. a model crashing on load). Carry the status + a snippet of the body so a caller
+            # like `warmup` can reclassify and surface the backend's own message (CUDA errors etc.).
+            detail = resp.text.strip()
+            detail = f": {detail[:300]}" if detail else ""
             raise AdminUnavailable(
-                f"Ollama admin API returned HTTP {resp.status_code} for {path}"
+                f"Ollama admin API returned HTTP {resp.status_code} for {path}{detail}",
+                status=resp.status_code,
             )
         try:
             return resp.json()
@@ -169,5 +192,14 @@ class OllamaAdmin:
         if num_ctx is not None:
             body["options"] = {"num_ctx": num_ctx}
         start = time.perf_counter()
-        await self._request("POST", "/api/generate", timeout=self.load_timeout, json=body)
+        try:
+            await self._request("POST", "/api/generate", timeout=self.load_timeout, json=body)
+        except AdminUnavailable as exc:
+            # A 5xx here isn't "admin API absent" — the load call reached Ollama and the model
+            # itself failed to load (VRAM overcommit crashes llama-server). Reclassify so callers
+            # don't degrade or persist a model that can't run. Connection errors / 404 stay as-is.
+            if exc.status is not None and exc.status >= 500:
+                # Carry just the backend's detail; callers frame it with the model name.
+                raise ModelLoadError(str(exc)) from exc
+            raise
         return time.perf_counter() - start
