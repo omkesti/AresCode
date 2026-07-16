@@ -118,6 +118,34 @@ async def test_loop_skips_duplicate_action():
     assert any("skipped repeated" in n for n in obs.notices)
 
 
+class StuckProvider(ModelProvider):
+    """Always emits the SAME action — models the empty-write_file spin from the bug report."""
+
+    def __init__(self, action_text: str) -> None:
+        self.action_text = action_text
+        self.calls = 0
+
+    async def chat(self, messages, **opts) -> AsyncIterator[Chunk]:  # type: ignore[override]
+        self.calls += 1
+        yield Chunk(self.action_text)
+
+
+async def test_loop_stops_when_action_repeats_without_progress():
+    # Regression: an identical action every step used to be skipped-as-duplicate forever, burning
+    # all 25 steps. It must now stop promptly once no step makes progress.
+    provider = StuckProvider("<tool>write_file</tool><path>x.py</path>\n```\ncode\n```")
+    executor = FakeExecutor()
+    obs = RecordingObserver()
+    result = await run_turn(
+        "go", state=SessionState.new("m"), provider=provider, executor=executor,
+        system_prompt="sys", observer=obs, max_steps=25,
+    )
+    assert "without making progress" in result
+    assert len(executor.calls) == 1  # ran once, then only skipped repeats
+    assert provider.calls < 25  # stopped well before the step cap
+    assert any("stopping" in n for n in obs.notices)
+
+
 async def test_loop_respects_interrupt_flag():
     provider = ScriptedProvider(["should not be called"])
     result = await run_turn(

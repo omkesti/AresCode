@@ -47,6 +47,17 @@ DUPLICATE_NUDGE = (
 # How many times an identical action may run within one turn before it's treated as a loop.
 REPEAT_LIMIT = 2
 
+# Consecutive steps where *nothing* executed (every action skipped-as-repeat or denied) before we
+# give up. Without this a model that emits the same failing action forever — e.g. a write_file whose
+# content the parser couldn't recover — spins until the step cap instead of stopping promptly.
+STALL_LIMIT = 2
+
+STALL_MESSAGE = (
+    "I stopped because the model kept repeating the same action without making progress "
+    "(it never applied a working change). Try rephrasing the request, or check the file/edit it "
+    "was attempting."
+)
+
 # Re-states the user's own request: without it a confused model will latch onto the nearest
 # task-shaped text it can see — including the formatting example in the system prompt.
 UNSAVED_FILE_NUDGE = (
@@ -163,6 +174,7 @@ async def run_turn(
     wants_change = _wants_file_change(user_msg)
     wrote_file = False
     nudged_unsaved = False
+    stalled_steps = 0  # consecutive steps that executed nothing (all skipped/denied)
 
     for _ in range(max_steps):
         if should_interrupt():
@@ -196,6 +208,7 @@ async def run_turn(
             obs.assistant_text(result.prose)
 
         observations: list[str] = []
+        ran_something = False  # did any action actually execute this step?
         for action in result.actions:
             # Skip an action that repeats the immediately previous one (spec) or that has
             # already run to its per-turn limit (catches A/B/A/B cycles).
@@ -216,12 +229,21 @@ async def run_turn(
             duration = time.perf_counter() - started
             obs.tool_end(action, tool_result, duration)
             observations.append(format_observation(action, tool_result))
+            ran_something = True
             if tool_result.ok and isinstance(action, (WriteFileAction, EditFileAction)):
                 wrote_file = True
             executed[action] = executed.get(action, 0) + 1
             last_action = action
 
         state.append("user", "\n\n".join(observations))
+
+        # Stall guard: a step that executed nothing (every action was a skipped repeat or a
+        # denial) made no progress. Tolerate a couple so the model can course-correct on the
+        # nudge, then stop — otherwise a stuck model burns every remaining step doing nothing.
+        stalled_steps = 0 if ran_something else stalled_steps + 1
+        if stalled_steps >= STALL_LIMIT:
+            obs.notice("stopping: repeated the same action without making progress")
+            return STALL_MESSAGE
 
     obs.notice(f"reached the step limit ({max_steps})")
     return f"Reached the step limit ({max_steps} steps) without finishing. Tell me how to proceed."
