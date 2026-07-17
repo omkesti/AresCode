@@ -119,7 +119,8 @@ Input shortcuts:
 | Shortcut | Behavior |
 |---|---|
 | Enter | Send the message. |
-| Ctrl+J | Insert a newline. |
+| \ + Enter | Insert a newline (end the line with a backslash to continue). |
+| Ctrl+J | Insert a newline (fallback). |
 | Ctrl+C | Cancel the current turn. |
 | Ctrl+D | Exit. |
 

@@ -107,9 +107,11 @@ without removing the reason the floor exists.
 - **`num_ctx` must always be set explicitly** on Ollama calls (default 16384). Ollama silently
   defaults to 4096 regardless of model capability, which truncates context and masquerades as "the
   model is dumb." A reasoning failure? Check `num_ctx` first.
-- **REPL input: Enter sends; Ctrl+J (or Alt+Enter) inserts a newline** — a deliberate inversion of
-  the default prompt_toolkit multiline binding (and of the literal wording in TASKS 1.3), because
-  Windows Terminal swallows Alt+Enter as its fullscreen toggle. Don't revert it.
+- **REPL input: Enter sends; a trailing backslash before Enter (shell-style `\` + Enter) inserts a
+  newline, with Ctrl+J as a terminal-reliable fallback (Alt+Enter too where delivered)** — a
+  deliberate inversion of the default prompt_toolkit multiline binding (and of the literal wording
+  in TASKS 1.3), because Windows Terminal swallows Alt+Enter as its fullscreen toggle. Don't revert
+  Enter-sends.
 - **Project memory file is `ARES.md`** (AresCode's equivalent of CLAUDE.md), loaded into the system
   prompt when present; Phase 5 adds support and an `arescode init` template generator.
 - Respect the **MVP scope contract** (`docs/context.md` §1): sub-agents, MCP, TODO planner,

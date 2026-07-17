@@ -51,7 +51,8 @@
    - Always set `num_ctx` explicitly on Ollama calls (default 16384).
 
 4. **REPL Input Handling**:
-   - Enter sends; Ctrl+J inserts a newline for Windows Terminal compatibility.
+   - Enter sends; a trailing backslash before Enter (`\` + Enter) inserts a newline, with Ctrl+J as
+     a fallback for Windows Terminal compatibility.
 
 5. **Project Memory File**:
    - ARES.md loaded into the system prompt when present.

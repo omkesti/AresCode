@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.keys import Keys
 from rich.console import Console
 
@@ -60,6 +62,47 @@ def test_enter_submits_and_newline_keys_are_bound():
     assert bindings[(Keys.ControlM,)] == "_submit"  # Enter -> send
     assert bindings[(Keys.ControlJ,)] == "_newline"  # Ctrl+J -> newline
     assert bindings[(Keys.Escape, Keys.ControlM)] == "_newline"  # Alt+Enter -> newline
+
+
+def _enter_handler():
+    for b in _build_key_bindings().bindings:
+        if b.keys == (Keys.ControlM,):
+            return b.handler
+    raise AssertionError("Enter is not bound")
+
+
+def test_trailing_backslash_enter_inserts_newline():
+    # `\` + Enter is line continuation: the backslash is consumed and a newline inserted,
+    # instead of submitting the message.
+    buffer = Buffer()
+    buffer.insert_text("first\\")
+    submitted = False
+
+    def _fail_submit() -> None:
+        nonlocal submitted
+        submitted = True
+
+    buffer.validate_and_handle = _fail_submit  # type: ignore[method-assign]
+    _enter_handler()(SimpleNamespace(current_buffer=buffer))
+
+    assert buffer.text == "first\n"  # backslash gone, newline added
+    assert submitted is False  # did not send
+
+
+def test_enter_without_backslash_submits():
+    buffer = Buffer()
+    buffer.insert_text("send me")
+    submitted = False
+
+    def _record_submit() -> None:
+        nonlocal submitted
+        submitted = True
+
+    buffer.validate_and_handle = _record_submit  # type: ignore[method-assign]
+    _enter_handler()(SimpleNamespace(current_buffer=buffer))
+
+    assert submitted is True
+    assert buffer.text == "send me"  # unchanged
 
 
 def test_verbose_command_toggles():

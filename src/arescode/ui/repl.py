@@ -1,6 +1,6 @@
 """Interactive REPL: prompt_toolkit input, slash commands, and the agent loop.
 
-Enter sends; Ctrl+J (or Alt+Enter where the terminal allows it) inserts a newline. Each message
+Enter sends; a trailing backslash before Enter (or Ctrl+J) inserts a newline. Each message
 runs the agent loop (the model can read files, search, and run commands), rendered as a tool
 trace. Ctrl+C cancels the current turn without killing the session; Ctrl+D exits
 (context.md §3, TASKS 1.3 / 1.6 / 2.8).
@@ -51,6 +51,7 @@ Commands:
   /exit, /quit     leave AresCode
 Input:
   Enter            send the message
+  \\ + Enter        insert a newline (end the line with a backslash to continue)
   Ctrl+J           insert a newline (also Alt+Enter where the terminal allows it)
   Ctrl+C           cancel the current turn
   Ctrl+D           exit
@@ -117,20 +118,29 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
 
 
 def _build_key_bindings() -> KeyBindings:
-    """Enter sends; Ctrl+J and Alt+Enter insert a newline.
+    """Enter sends; a trailing backslash before Enter (or Ctrl+J) inserts a newline.
 
     prompt_toolkit's default multiline binding is the opposite (Enter=newline,
     Alt+Enter=submit), which is unintuitive for chat and unusable on Windows Terminal,
     where Alt+Enter is intercepted as the fullscreen toggle and never reaches the app.
-    So we bind Enter to submit and give newlines dedicated keys.
+    So Enter submits, and to continue onto a new line you end the line with a backslash
+    (shell-style ``\\`` + Enter, which consumes the backslash). Ctrl+J stays bound as a
+    terminal-reliable fallback for a bare newline.
     """
     kb = KeyBindings()
 
     @kb.add("enter")
     def _submit(event) -> None:
-        event.current_buffer.validate_and_handle()
+        buffer = event.current_buffer
+        # Shell-style line continuation: a backslash immediately before the cursor turns
+        # Enter into a newline and is itself consumed, so `\<Enter>` starts a new line.
+        if buffer.document.char_before_cursor == "\\":
+            buffer.delete_before_cursor(1)
+            buffer.insert_text("\n")
+        else:
+            buffer.validate_and_handle()
 
-    @kb.add("c-j")  # Ctrl+J: reliable newline in every terminal
+    @kb.add("c-j")  # Ctrl+J: reliable bare newline in every terminal
     @kb.add("escape", "enter")  # Alt+Enter: newline where the terminal delivers it
     def _newline(event) -> None:
         event.current_buffer.insert_text("\n")

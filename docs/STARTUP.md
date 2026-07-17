@@ -145,7 +145,7 @@ arescode init                                   # write a starter ARES.md in the
 ```
 
 This opens the interactive REPL. Type a message and press **Enter** to send
-(**Ctrl+J** inserts a newline). In-REPL commands:
+(end a line with **\\** before Enter — or press **Ctrl+J** — to insert a newline). In-REPL commands:
 
 | Command | Effect |
 |---|---|
