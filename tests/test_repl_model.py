@@ -18,7 +18,8 @@ from arescode.providers.ollama_admin import (
     ModelLoadError,
 )
 from arescode.tools.registry import Executor
-from arescode.ui.repl import _activate_model, _switch_model
+from arescode.ui import repl as repl_mod
+from arescode.ui.repl import _activate_model, _preflight, _switch_model
 
 M7B = "qwen2.5-coder:7b"
 M14B = "qwen2.5-coder:14b-instruct"
@@ -194,6 +195,56 @@ async def test_switch_model_command_switches_and_rebuilds_provider(tmp_path):
     assert executor.active_model == M14B
     # D13: a successful switch is remembered as the next launch's default (isolated by conftest).
     assert config_module.read_last_model() == M14B
+
+
+# --- first-run preflight (TASKS 6.2) ---------------------------------------
+
+
+def _force_rg(monkeypatch, present: bool) -> None:
+    """Pin ripgrep presence so preflight tests don't depend on the host's PATH."""
+    monkeypatch.setattr(repl_mod.shutil, "which", lambda name: "/usr/bin/rg" if present else None)
+
+
+async def test_preflight_quiet_when_server_up_and_model_present(monkeypatch):
+    _force_rg(monkeypatch, True)
+    console = _console()
+    await _preflight(_manager(FakeAdmin()), M7B, "http://localhost:11434/v1", console)
+    assert console.file.getvalue() == ""  # nothing to warn about
+
+
+async def test_preflight_warns_when_model_missing(monkeypatch):
+    _force_rg(monkeypatch, True)
+    console = _console()
+    manager = _manager(FakeAdmin(installed=[InstalledModel(M14B)]))
+    await _preflight(manager, M7B, "http://localhost:11434/v1", console)
+    assert f"ollama pull {M7B}" in console.file.getvalue()
+
+
+async def test_preflight_warns_when_server_down(monkeypatch):
+    _force_rg(monkeypatch, True)
+    console = _console()
+    manager = _manager(FakeAdmin(available=False))
+    await _preflight(manager, M7B, "http://localhost:11434/v1", console)
+    assert "ollama serve" in console.file.getvalue()
+
+
+async def test_preflight_quiet_for_non_ollama_backend(monkeypatch):
+    _force_rg(monkeypatch, True)
+    console = _console()
+
+    class Admin404:
+        async def list_installed(self):
+            raise AdminUnavailable("no native API here", status=404)
+
+    await _preflight(_manager(Admin404()), M7B, "http://localhost:1234/v1", console)
+    assert console.file.getvalue() == ""  # can't probe a non-Ollama backend -> stay silent
+
+
+async def test_preflight_reports_missing_ripgrep(monkeypatch):
+    _force_rg(monkeypatch, False)
+    console = _console()
+    await _preflight(_manager(FakeAdmin()), M7B, "http://localhost:11434/v1", console)
+    assert "ripgrep" in console.file.getvalue()
 
 
 async def test_switch_model_ambiguous_target_is_rejected(tmp_path):

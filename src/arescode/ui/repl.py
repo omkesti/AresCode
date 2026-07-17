@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import sys
 import time
 from contextlib import suppress
@@ -328,6 +329,69 @@ def _format_sessions(infos: list[SessionInfo], current_id: str) -> str:
     return "\n".join(lines)
 
 
+def _startup_warnings(
+    model: str,
+    base_url: str,
+    installed: list[str] | None,
+    *,
+    server_unreachable: bool,
+    rg_present: bool,
+) -> str:
+    """Build the first-run warning text (empty when all is well) — pure, so it is unit-testable.
+
+    ``installed`` is the model list from the server, or ``None`` when it couldn't be determined
+    (a non-Ollama backend whose native API 404s — we then can't check the model, so we stay quiet
+    about it). ``server_unreachable`` is set only for a connection-level failure (the server is
+    down). Each problem is stated with the exact command that fixes it (TASKS 6.2).
+    """
+    blocks: list[str] = []
+    if server_unreachable:
+        blocks.append(
+            f"Can't reach the model server at {base_url}.\n"
+            f"  -> Start Ollama with:  ollama serve\n"
+            f"  (or set base_url in .arescode.toml if your backend lives elsewhere)"
+        )
+    elif installed is not None and match_model(model, installed).model is None:
+        block = (
+            f"Model '{model}' is not installed on the server.\n"
+            f"  -> Pull it with:  ollama pull {model}"
+        )
+        if installed:
+            block += f"\n  Installed: {', '.join(sorted(installed))}"
+        blocks.append(block)
+    if not rg_present:
+        blocks.append(
+            "ripgrep (rg) is not on PATH — grep will use a slower built-in fallback.\n"
+            "  -> For faster search, install ripgrep: https://github.com/BurntSushi/ripgrep"
+        )
+    return "\n".join(blocks)
+
+
+async def _preflight(manager: ModelManager, model: str, base_url: str, console: Console) -> None:
+    """Best-effort first-run check: warn (with exact fixes) if the server is down, the configured
+    model is missing, or ripgrep is absent. Never fatal — a transient issue shouldn't block the
+    launch, and a non-Ollama backend simply can't be probed this way (context.md §4.7, TASKS 6.2).
+    """
+    installed: list[str] | None = None
+    server_unreachable = False
+    try:
+        installed = [m.name for m in await manager.admin.list_installed()]
+    except AdminUnavailable as exc:
+        # status is None -> connection-level failure (server down); a set status (e.g. 404) means
+        # the native API is absent (non-Ollama backend), which is not an error we can act on.
+        server_unreachable = exc.status is None
+    text = _startup_warnings(
+        model, base_url, installed,
+        server_unreachable=server_unreachable, rg_present=shutil.which("rg") is not None,
+    )
+    if not text:
+        return
+    console.print()
+    for line in text.splitlines():
+        # Headline lines (flush-left) stand out; indented fix/detail lines are dimmed.
+        console.print(f"[dim]{line}[/dim]" if line.startswith(" ") else f"[yellow]{line}[/yellow]")
+
+
 def _history_path() -> Path:
     directory = Path.home() / ".arescode"
     directory.mkdir(parents=True, exist_ok=True)
@@ -495,6 +559,10 @@ async def run(
     config = await _activate_model(manager, state, config, console, resume=resume)
     provider = OpenAICompatProvider.from_config(config)
     executor.active_model = state.model
+
+    # First-run check: surface a down server / missing model / absent ripgrep with the exact fix,
+    # before the user types and hits it as a turn error (TASKS 6.2). Best-effort, never fatal.
+    await _preflight(manager, state.model, config.base_url, console)
 
     render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
     if yolo:

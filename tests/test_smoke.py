@@ -7,12 +7,12 @@ regression in ``load_config`` fails loudly. See TASKS 0.3 / 0.5, D13.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from arescode import __version__
 from arescode import config as config_module
 from arescode.config import (
     Config,
+    ConfigError,
     load_config,
     migrate_legacy_paths,
     read_last_model,
@@ -116,7 +116,8 @@ def test_cli_model_beats_remembered(tmp_path):
 
 def test_unknown_config_key_is_rejected(tmp_path):
     (tmp_path / ".arescode.toml").write_text("bogus_key = 1\n")
-    with pytest.raises(ValidationError):
+    # load_config wraps pydantic's ValidationError as a clean, user-facing ConfigError (TASKS 6.3).
+    with pytest.raises(ConfigError):
         load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
 
 
@@ -143,7 +144,7 @@ def test_unknown_key_in_model_section_is_rejected(tmp_path):
     (tmp_path / ".arescode.toml").write_text(
         '[models."qwen2.5-coder:7b"]\nbogus = 1\n'
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ConfigError):
         load_config(project_dir=tmp_path, global_config_path=tmp_path / "global.toml")
 
 

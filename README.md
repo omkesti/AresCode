@@ -55,33 +55,34 @@ with `/model` (your choice is remembered next launch):
 ollama pull qwen2.5-coder:14b-instruct
 ```
 
-### 2. Install AresCode for development
+### 2. Install AresCode
+
+To just use it, install with [pipx](https://pipx.pypa.io) so the `arescode` command is available
+everywhere in its own isolated environment:
+
+```powershell
+pipx install .
+arescode --version
+```
+
+To hack on AresCode instead, use an editable install:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1      # macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-macOS/Linux:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-### 3. Verify Ollama
+### 3. Run inside a project
 
 ```powershell
-python scripts/check_ollama.py
-```
-
-### 4. Run inside a project
-
-```powershell
+cd path\to\your\project
 arescode
 ```
+
+On startup AresCode checks that the Ollama server is reachable and the model is installed, and prints
+the exact `ollama serve` / `ollama pull` command if something is missing — so a first run tells you
+what to fix. To probe the server manually you can still run `python scripts/check_ollama.py`.
 
 Useful launch flags:
 
@@ -105,6 +106,7 @@ Common commands:
 |---|---|
 | `/help` | Show REPL commands. |
 | `/clear` | Reset conversation history. |
+| `/init` | Scan the repo and write/update `ARES.md` project memory (model-authored). |
 | `/model [name]` | Pick or switch the active model. |
 | `/verbose` | Toggle full tool output in the trace. |
 | `/stats` | Show edit telemetry grouped by model. |
@@ -112,6 +114,8 @@ Common commands:
 | `/compact` | Summarize older history now to reclaim context budget. |
 | `/allow [cmd]` | View or add a session command allowlist entry. |
 | `/deny <cmd>` | Remove a command from the session allowlist. |
+| `/sessions` | List saved sessions for this project. |
+| `/resume <id>` | Load a saved session by id (or a unique id prefix). |
 | `/exit`, `/quit` | Leave AresCode. |
 
 Input shortcuts:

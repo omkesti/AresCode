@@ -110,13 +110,13 @@
 ## Phase 6 — Polish & ship (packaging + DX) — milestone M6
 
 - [x] 6.1 Complete slash commands: `/stats`, `/compact`, `/map`, `/allow`, `/deny`, `/verbose`, `/resume <id>`, `/sessions` — the last two round out the set (`SessionState.list_sessions`/`resolve` + REPL wiring; `/resume` loads a session by id or unique id-prefix and keeps the active model)
-- [ ] 6.2 First-run experience: detect missing Ollama/model and print exact fix commands; graceful message when ripgrep absent
-- [ ] 6.3 Error-path sweep: model server down mid-turn, malformed config, unreadable files, git-less directories — all produce clear messages, never tracebacks
-- [ ] 6.4 Packaging: installable via `pipx install .`, console script `arescode`; **version command done** (`--version` flag, eager, prints `arescode <version>`); README with 5-minute quickstart still to verify (per docs principle: <5 min to first success)
-- [ ] 6.5 Dogfood gauntlet: use AresCode itself (not Claude Code) for 3 real tasks on one of your other projects (e.g., a JARVIS or Suture fix); log every failure into `LATER.md` or the parser corpus
+- [x] 6.2 First-run experience: a startup preflight (`repl._preflight`) warns with the exact fix when the Ollama server is unreachable (`ollama serve`) or the configured model is missing (`ollama pull <tag>`), degrades silently for a non-Ollama backend (native API 404), and notes when ripgrep is absent (grep already has a pure-Python fallback). Never fatal.
+- [x] 6.3 Error-path sweep: model server down mid-turn already returns `error: …` (loop catches `ProviderError`); **added** — malformed config (bad TOML / out-of-range value) now raises a clean `ConfigError` and the CLI exits 1 with a message instead of a traceback; unreadable files surface as tool errors (Executor wraps `ToolError`); git-less dirs are fine (repo map is `.gitignore`-driven, not `.git`-driven, and `_scan` swallows `OSError`); legacy-migration failures warn instead of aborting
+- [x] 6.4 Packaging: `pipx install .` works (hatchling wheel + `arescode` console script, both verified by building the wheel); `--version` flag added; **fixed a real packaging bug** — `prompts/system.md` was not in the wheel, so an installed AresCode silently fell back to the minimal prompt; it is now force-included as `arescode/prompts/system.md` and `context.py` looks there first; README rewritten with a `pipx` quick start (<5 min) + the startup preflight note
+- [ ] 6.5 Dogfood gauntlet (**on-device, user-run — needs a live model**): runbook written at `docs/DOGFOOD.md` (3 tasks, logging template, exit criterion) and the corpus destination created at `tests/fixtures/model_outputs/`; the actual 3-task run on another project + re-baselining D11 edit-success is the author's live check
 - [x] 6.6 Write `LATER.md`: deferred features backlog (sub-agents, MCP, TODO planner, tree-sitter symbols, steering queue, multi-model routing) so scope creep has a home that isn't the codebase
 
-**Exit criteria — MVP Definition of Done (from context.md §7):** in a real repo, `arescode` takes "fix the failing test in X", finds the file, edits it, reruns tests, and reports success — every write/command approved through the gate — using only the local model.
+**Exit criteria — MVP Definition of Done (from context.md §7):** in a real repo, `arescode` takes "fix the failing test in X", finds the file, edits it, reruns tests, and reports success — every write/command approved through the gate — using only the local model. _(Harness-side polish 6.1–6.4/6.6 complete + tested; the live end-to-end confirmation is the 6.5 dogfood run.)_
 
 ---
 

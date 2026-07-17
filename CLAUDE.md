@@ -26,8 +26,14 @@ captures what actively shapes day-to-day work.
   & persistent allowlists, `/allow` `/deny`, and `--yolo`), and the **endurance layer** — a
   gitignore-filtered **repo map** (`/map`), **`ARES.md`** project memory injected into the system
   prompt, token accounting, and **summarizing compaction** at 75% budget (`/compact`).
-- **Next is Phase 6 (Polish)** — remaining slash commands, first-run experience, error-path sweep,
-  packaging, and the dogfood gauntlet.
+- **Phase 6 (Polish) is harness-side complete and test-green** — the full slash-command set (now
+  incl. `/sessions` and `/resume <id>`), a **first-run preflight** (`repl._preflight`: warns with the
+  exact `ollama serve` / `ollama pull` fix, notes a missing ripgrep), the **error-path sweep**
+  (malformed config → clean `ConfigError` + CLI exit, never a traceback), **packaging** (`pipx`-ready
+  wheel + `--version`; `prompts/system.md` is now force-included in the wheel so an installed build
+  doesn't fall back to the minimal prompt), and **`LATER.md`**. The one remaining item is **6.5, the
+  on-device dogfood gauntlet** (needs a live model; runbook at `docs/DOGFOOD.md`, corpus destination
+  at `tests/fixtures/model_outputs/`).
 
 Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
 `core/loop.py`, `core/context.py` (system-prompt assembly + token budget + compaction),

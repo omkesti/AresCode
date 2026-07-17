@@ -13,7 +13,7 @@ from pathlib import Path
 import typer
 
 from arescode import __version__
-from arescode.config import load_config, migrate_legacy_paths
+from arescode.config import ConfigError, load_config, migrate_legacy_paths
 
 app = typer.Typer(
     add_completion=False,
@@ -71,11 +71,22 @@ def _default(
     _validate_project_dir(project_dir)
 
     # One-time rename migration: copy any agent-cli-era config/sessions to the arescode paths.
-    migrated = migrate_legacy_paths(project_dir)
-    if migrated:
-        typer.echo(f"info: migrated legacy agent-cli data to AresCode ({'; '.join(migrated)})")
+    # Best-effort — a copy failure (permissions, disk) must warn, never abort the launch.
+    try:
+        migrated = migrate_legacy_paths(project_dir)
+        if migrated:
+            typer.echo(f"info: migrated legacy agent-cli data to AresCode ({'; '.join(migrated)})")
+    except OSError as exc:
+        typer.echo(f"warning: could not migrate legacy agent-cli data: {exc}", err=True)
 
-    config = load_config(project_dir=project_dir, overrides={"model": model, "num_ctx": ctx_size})
+    try:
+        config = load_config(
+            project_dir=project_dir, overrides={"model": model, "num_ctx": ctx_size}
+        )
+    except ConfigError as exc:
+        # A bad TOML file or an out-of-range value: report it cleanly and exit, no traceback.
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     # Imported lazily so `--help` and startup stay fast and don't pull in the UI stack.
     from arescode.ui.repl import run

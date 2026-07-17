@@ -76,20 +76,33 @@ def hard_truncate(messages: list[Message], budget: int, *, keep_last: int = 4) -
 # ---------------------------------------------------------------------------
 
 
-def _system_prompt_path() -> Path:
-    # This file lives at <repo>/src/arescode/core/context.py; the prompt at <repo>/prompts/.
-    return Path(__file__).resolve().parents[3] / "prompts" / "system.md"
+def _system_prompt_candidates() -> list[Path]:
+    """Every place the versioned system prompt might live, best (nearest) first.
+
+    Two layouts must both work: an *installed* package (``pipx install`` / a wheel), where the
+    prompt is bundled beside the package as ``arescode/prompts/system.md`` (via the wheel
+    force-include in pyproject.toml), and a *source tree* (editable install), where it lives at the
+    repo root in ``prompts/system.md``. Shipping only the latter path was a real bug — an installed
+    AresCode silently fell back to the minimal prompt, dropping the whole action protocol (6.4).
+    """
+    here = Path(__file__).resolve()
+    return [
+        here.parents[1] / "prompts" / "system.md",  # installed: <site-packages>/arescode/prompts/
+        here.parents[3] / "prompts" / "system.md",  # source tree: <repo>/prompts/
+    ]
 
 
 @lru_cache(maxsize=1)
 def load_system_prompt() -> str:
     """Return the versioned system prompt, or a minimal fallback if it can't be found."""
-    path = _system_prompt_path()
-    try:
-        text = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return _FALLBACK_SYSTEM_PROMPT
-    return text or _FALLBACK_SYSTEM_PROMPT
+    for path in _system_prompt_candidates():
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if text:
+            return text
+    return _FALLBACK_SYSTEM_PROMPT
 
 
 def load_project_memory(project_dir: Path | str) -> str:

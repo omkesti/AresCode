@@ -6,20 +6,25 @@ The provider is faked (returns a canned summary or raises), so no live model is 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
+import arescode
 from arescode.core.context import (
+    _FALLBACK_SYSTEM_PROMPT,
     ARES_MEMORY_FILENAME,
     INIT_SYSTEM_PROMPT,
     INIT_USER_TEMPLATE,
     REPLY_RESERVE_TOKENS,
     SUMMARY_PREFIX,
     _fold,
+    _system_prompt_candidates,
     assemble_system_prompt,
     budget_for,
     compact_now,
     estimate_tokens,
     gather_init_context,
     load_project_memory,
+    load_system_prompt,
     maybe_compact,
 )
 from arescode.core.state import Message, SessionState
@@ -44,6 +49,25 @@ class FailingProvider(ModelProvider):
     async def chat(self, messages, **opts) -> AsyncIterator[Chunk]:  # type: ignore[override]
         raise ProviderError("model server down")
         yield Chunk("")  # pragma: no cover - makes this a generator
+
+
+# --- system-prompt loading / packaging (TASKS 2.7, 6.4) ----------------------
+
+
+def test_system_prompt_loads_the_real_prompt_not_the_fallback():
+    # If this returns the fallback, either the file is missing or it is not being found — the exact
+    # failure that would ship a crippled agent in a pipx install (guards the packaging fix).
+    prompt = load_system_prompt()
+    assert prompt != _FALLBACK_SYSTEM_PROMPT
+    assert len(prompt) > 500  # the real prompt has the action protocol + few-shot examples
+
+
+def test_system_prompt_candidates_include_the_packaged_location_first():
+    # The installed layout (arescode/prompts/system.md, bundled via the wheel force-include) must be
+    # checked before the source-tree path, so a pipx install finds the prompt beside the package.
+    packaged = _system_prompt_candidates()[0]
+    package_dir = Path(arescode.__file__).resolve().parent
+    assert packaged == package_dir / "prompts" / "system.md"
 
 
 def _state(n: int, chars: int) -> SessionState:

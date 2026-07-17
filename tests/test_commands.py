@@ -20,8 +20,12 @@ from arescode.ui.repl import (
     _clean_ares_content,
     _format_sessions,
     _map_structure,
+    _startup_warnings,
     parse_command,
 )
+
+M7B = "qwen2.5-coder:7b"
+M14B = "qwen2.5-coder:14b-instruct"
 
 
 def _console() -> Console:
@@ -222,6 +226,61 @@ def test_format_sessions_marks_current_and_lists_all():
 
 def test_format_sessions_handles_empty():
     assert "no saved sessions" in _format_sessions([], current_id="x")
+
+
+# --- first-run warnings (TASKS 6.2) ------------------------------------------
+
+
+def test_startup_warnings_all_good_is_empty():
+    text = _startup_warnings(
+        M7B, "http://localhost:11434/v1", [M7B, M14B],
+        server_unreachable=False, rg_present=True,
+    )
+    assert text == ""
+
+
+def test_startup_warnings_server_down_shows_serve_command():
+    text = _startup_warnings(
+        M7B, "http://localhost:11434/v1", None,
+        server_unreachable=True, rg_present=True,
+    )
+    assert "ollama serve" in text
+    assert "http://localhost:11434/v1" in text
+
+
+def test_startup_warnings_missing_model_shows_pull_command():
+    text = _startup_warnings(
+        M7B, "http://localhost:11434/v1", [M14B],
+        server_unreachable=False, rg_present=True,
+    )
+    assert f"ollama pull {M7B}" in text
+    assert M14B in text  # the installed list is shown so the user can pick one
+
+
+def test_startup_warnings_present_model_no_warning():
+    text = _startup_warnings(
+        M7B, "http://localhost:11434/v1", [M7B],
+        server_unreachable=False, rg_present=True,
+    )
+    assert text == ""
+
+
+def test_startup_warnings_non_ollama_backend_is_quiet_about_model():
+    # installed is None (native API absent): we can't check the model, so say nothing about it.
+    text = _startup_warnings(
+        M7B, "http://localhost:1234/v1", None,
+        server_unreachable=False, rg_present=True,
+    )
+    assert text == ""
+
+
+def test_startup_warnings_missing_ripgrep_is_reported_and_combines():
+    text = _startup_warnings(
+        M7B, "http://localhost:11434/v1", [M14B],
+        server_unreachable=False, rg_present=False,
+    )
+    assert "ripgrep" in text
+    assert f"ollama pull {M7B}" in text  # both problems surface together
 
 
 async def _never_escape() -> None:

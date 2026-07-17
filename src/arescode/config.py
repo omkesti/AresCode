@@ -24,7 +24,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 GLOBAL_CONFIG_PATH = Path.home() / ".arescode" / "config.toml"
 PROJECT_CONFIG_NAME = ".arescode.toml"
@@ -41,6 +41,15 @@ LAST_MODEL_PATH = Path.home() / ".arescode" / "last_model"
 LEGACY_GLOBAL_DIR = Path.home() / ".agentcli"
 LEGACY_PROJECT_CONFIG_NAME = ".agentcli.toml"
 LEGACY_PROJECT_STATE_DIR = ".agentcli"  # old per-project dir that held sessions/
+
+
+class ConfigError(Exception):
+    """A user-facing configuration problem: unreadable/invalid TOML or values that fail validation.
+
+    Raised by :func:`load_config` so the CLI can print one clean line and exit instead of dumping a
+    ``tomllib``/pydantic traceback at the user (TASKS 6.3). The message always names what is wrong
+    and, where possible, which file to look at.
+    """
 
 
 class ModelSettings(BaseModel):
@@ -119,11 +128,20 @@ class Config(BaseModel):
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
-    """Parse a TOML file into a dict, returning ``{}`` if it does not exist."""
+    """Parse a TOML file into a dict, returning ``{}`` if it does not exist.
+
+    A syntax error or an unreadable file becomes a :class:`ConfigError` naming ``path`` — so the
+    caller can report *which* file is broken rather than surfacing a raw ``tomllib``/OS traceback.
+    """
     if not path.is_file():
         return {}
-    with path.open("rb") as fh:
-        return tomllib.load(fh)
+    try:
+        with path.open("rb") as fh:
+            return tomllib.load(fh)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path} contains invalid TOML: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"could not read config file {path}: {exc}") from exc
 
 
 def read_last_model(path: Path | None = None) -> str | None:
@@ -178,7 +196,22 @@ def load_config(
     if overrides:
         merged.update({key: value for key, value in overrides.items() if value is not None})
 
-    return Config(**merged)
+    try:
+        return Config(**merged)
+    except ValidationError as exc:
+        raise ConfigError(
+            "invalid configuration (check ~/.arescode/config.toml and ./.arescode.toml):\n"
+            + _format_validation_error(exc)
+        ) from exc
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Render a pydantic ValidationError as short ``  field: message`` lines (no traceback)."""
+    lines = []
+    for err in exc.errors():
+        loc = ".".join(str(part) for part in err["loc"]) or "(root)"
+        lines.append(f"  {loc}: {err['msg']}")
+    return "\n".join(lines)
 
 
 def migrate_legacy_paths(project_dir: Path | None = None) -> list[str]:

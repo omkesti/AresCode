@@ -33,6 +33,13 @@ arescode = "arescode.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/arescode"]
 
+# The versioned system prompt lives at the repo root (prompts/system.md) but must ship *inside* the
+# installed package so an installed AresCode (pipx/wheel) can still find it — otherwise it silently
+# falls back to the minimal prompt and loses the whole action protocol. Bundle it beside the package
+# as arescode/prompts/system.md; core/context.py looks there first, then the source-tree location.
+[tool.hatch.build.targets.wheel.force-include]
+"prompts/system.md" = "arescode/prompts/system.md"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
