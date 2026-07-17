@@ -83,4 +83,34 @@ Log every failure from running AresCode on a real project here (or, when it's a 
 output, into `tests/fixtures/model_outputs/` as a new parser-corpus case). Each entry: the task,
 what went wrong, and whether the fix belongs in the harness, the prompt, or this backlog.
 
-_(none yet — populate during the Phase 6 dogfood gauntlet)_
+### 2026-07-17 — headless gauntlet, task 1: "fix the failing test"
+
+Ran the real agent loop (provider → `run_turn` → parser → gate → executor, `--yolo` auto-approver)
+against live Ollama on a scratch project with a bugged `add` (`return a - b`). Driver:
+`scratchpad/dogfood.py`.
+
+- **`qwen2.5-coder:14b-instruct`: PASS end-to-end.** pytest (fail) → `read_file` → `edit_file` that
+  landed on the **exact** cascade tier → pytest (2 passed) → done. `/stats`: `1 attempted, 1 applied,
+  0 failed, exact=1`. **This meets the MVP Definition of Done on a live local model.**
+- **`qwen2.5-coder:7b`: FAIL — the edit never reached disk.** The harness worked (bash, read, the
+  unsaved-change nudge all fired), but the model emitted the SEARCH/REPLACE block with **bare
+  `SEARCH` / `REPLACE` keywords and no `<<<<<<< ======= >>>>>>>` conflict markers**. `SR_RE` needs
+  those markers and `_parse_tool` has no `edit_file` branch, so nothing parsed → treated as a
+  plain-text answer → turn ended with `edits: none`.
+
+**Finding A — parser gap (harness).** Bare-marker SEARCH/REPLACE is a real weak-model output.
+Recorded: `tests/fixtures/model_outputs/bare-search-replace-no-markers.txt` +
+`tests/test_parser_dogfood.py` (xfail). Candidate fix: when a `<tool>edit_file</tool>` tag is
+present and no conflict markers are found, fall back to splitting on bare `SEARCH`/`REPLACE` lines —
+scoped to the edit-tag case to bound false positives. **`parser.py` is a `[HAND]` file (D10); the
+fix is the author's call** (test written, awaiting decision).
+
+**Finding B — trace renderer crashes on non-UTF-8 stdout (Windows).** `render.tool_start` prints
+`●` (`●`); when stdout is a legacy cp1252 console/pipe rather than a UTF-8 terminal, rich's
+`legacy_windows_render` raises `UnicodeEncodeError` and takes down the turn. The interactive REPL on
+Windows Terminal (a real UTF-8 tty) is unaffected, but a redirected/legacy-codepage run isn't.
+Candidate fix: force a UTF-8 writer on the `Console` (or gate non-cp1252 glyphs on encoding support).
+
+**Observation — 14B on the RTX 3050 6GB.** The 14b loaded and ran two full turns this session
+(GPU reported free), contra the earlier "14b crashes at CUDA init" note — likely VRAM-pressure
+dependent. Re-baseline that assumption before relying on either statement.

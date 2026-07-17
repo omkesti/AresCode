@@ -26,14 +26,19 @@ captures what actively shapes day-to-day work.
   & persistent allowlists, `/allow` `/deny`, and `--yolo`), and the **endurance layer** — a
   gitignore-filtered **repo map** (`/map`), **`ARES.md`** project memory injected into the system
   prompt, token accounting, and **summarizing compaction** at 75% budget (`/compact`).
-- **Phase 6 (Polish) is harness-side complete and test-green** — the full slash-command set (now
-  incl. `/sessions` and `/resume <id>`), a **first-run preflight** (`repl._preflight`: warns with the
-  exact `ollama serve` / `ollama pull` fix, notes a missing ripgrep), the **error-path sweep**
-  (malformed config → clean `ConfigError` + CLI exit, never a traceback), **packaging** (`pipx`-ready
-  wheel + `--version`; `prompts/system.md` is now force-included in the wheel so an installed build
-  doesn't fall back to the minimal prompt), and **`LATER.md`**. The one remaining item is **6.5, the
-  on-device dogfood gauntlet** (needs a live model; runbook at `docs/DOGFOOD.md`, corpus destination
-  at `tests/fixtures/model_outputs/`).
+- **Phase 6 (Polish) is complete and test-green** — the full slash-command set (now incl.
+  `/sessions` and `/resume <id>`), a **first-run preflight** (`repl._preflight`: warns with the exact
+  `ollama serve` / `ollama pull` fix, notes a missing ripgrep), the **error-path sweep** (malformed
+  config → clean `ConfigError` + CLI exit, never a traceback), **packaging** (`pipx`-ready wheel +
+  `--version`; `prompts/system.md` is now force-included in the wheel so an installed build doesn't
+  fall back to the minimal prompt), **`LATER.md`**, and the **dogfood gauntlet** (`docs/DOGFOOD.md`).
+- **The MVP Definition of Done is met** — "fix the failing test" runs end-to-end on live
+  `qwen2.5-coder:14b-instruct` (dogfood, 2026-07-17): pytest fail → `edit_file` on the exact tier →
+  pytest green. **Open follow-up:** on the **7b** default the same task failed because the model
+  emitted a SEARCH/REPLACE block with **bare `SEARCH`/`REPLACE` and no `<<<<<<< ======= >>>>>>>`
+  markers**, which `parser.py` doesn't recover (recorded: `tests/fixtures/model_outputs/`,
+  `tests/test_parser_dogfood.py` xfail, and a candidate fix in `LATER.md`). `parser.py` is `[HAND]`
+  (D10) — the fix is the author's call.
 
 Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
 `core/loop.py`, `core/context.py` (system-prompt assembly + token budget + compaction),

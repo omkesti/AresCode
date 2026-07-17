@@ -1,0 +1,17 @@
+The `add` function is still incorrectly implemented. It subtracts `b` from `a` instead of adding them.
+
+Let's fix this by editing the `mathutils.py` file to correctly implement the `add` function.
+
+<tool>edit_file</tool><path>mathutils.py</path>
+
+SEARCH
+
+def add(a, b):
+    """Return the sum of a and b."""
+    return a - b
+
+REPLACE
+
+def add(a, b):
+    """Return the sum of a and b."""
+    return a + b
