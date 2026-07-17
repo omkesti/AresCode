@@ -9,7 +9,8 @@ from collections.abc import AsyncIterator
 
 from arescode.core.context import (
     ARES_MEMORY_FILENAME,
-    INIT_INSTRUCTION,
+    INIT_SYSTEM_PROMPT,
+    INIT_USER_TEMPLATE,
     REPLY_RESERVE_TOKENS,
     SUMMARY_PREFIX,
     _fold,
@@ -17,6 +18,7 @@ from arescode.core.context import (
     budget_for,
     compact_now,
     estimate_tokens,
+    gather_init_context,
     load_project_memory,
     maybe_compact,
 )
@@ -86,11 +88,33 @@ def test_assemble_omits_absent_sections(tmp_path):
     assert assemble_system_prompt(tmp_path, base_prompt="BASE", memory="", repo_map="") == "BASE"
 
 
-def test_init_instruction_targets_ares_md():
-    # The /init task message must name the memory file and drive an explore-then-write flow.
-    assert ARES_MEMORY_FILENAME in INIT_INSTRUCTION
-    assert "write_file" in INIT_INSTRUCTION
-    assert "EXPLORE" in INIT_INSTRUCTION and "WRITE" in INIT_INSTRUCTION
+def test_init_prompts_target_ares_md():
+    # /init authors the file model-side: a writer system prompt + a user template with a {context}
+    # slot, both naming the memory file and forbidding a wrapping code fence.
+    assert ARES_MEMORY_FILENAME in INIT_SYSTEM_PROMPT
+    assert ARES_MEMORY_FILENAME in INIT_USER_TEMPLATE
+    assert "{context}" in INIT_USER_TEMPLATE
+    assert "Overview" in INIT_USER_TEMPLATE and "Key commands" in INIT_USER_TEMPLATE
+
+
+def test_gather_init_context_reads_key_files_and_repo_map(tmp_path):
+    (tmp_path / "README.md").write_text("# Demo\nA sample project.\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+    (tmp_path / "ignored.py").write_text("x = 1\n")  # not an orientation file
+    ctx = gather_init_context(tmp_path, repo_map="src/\n  app.py  10B")
+
+    assert "### README.md" in ctx and "A sample project." in ctx
+    assert "### pyproject.toml" in ctx and "name = 'demo'" in ctx
+    assert "Repository structure" in ctx and "app.py" in ctx  # repo map is included
+    assert "### ignored.py" not in ctx  # only the curated orientation files are read
+
+
+def test_gather_init_context_truncates_long_files(tmp_path):
+    long_readme = "\n".join(f"line {i}" for i in range(400))
+    (tmp_path / "README.md").write_text(long_readme)
+    ctx = gather_init_context(tmp_path)
+    assert "more lines]" in ctx  # head-capped, not dumped whole
+    assert "line 399" not in ctx
 
 
 # --- compaction pure helper (5.4) ------------------------------------------

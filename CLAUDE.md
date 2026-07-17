@@ -114,8 +114,11 @@ without removing the reason the floor exists.
   in TASKS 1.3), because Windows Terminal swallows Alt+Enter as its fullscreen toggle. Don't revert
   Enter-sends.
 - **Project memory file is `ARES.md`** (AresCode's equivalent of CLAUDE.md), loaded into the system
-  prompt when present. It is **model-authored in-session via `/init`** (a normal agent turn on
-  `INIT_INSTRUCTION` that explores the repo and writes the file) — not a static CLI scaffold; do not
+  prompt when present. It is **model-authored in-session via `/init`**, but `/init` is deliberately
+  **not** an agent turn: `_run_init` has the harness gather orientation (`gather_init_context`) and
+  the model write the file's Markdown in one completion, then persists it through the gated write
+  path. Weak models write prose reliably but don't reliably emit a `write_file` across an
+  exploration loop — so the harness explores, the model writes. Not a static CLI scaffold; do not
   hand-maintain it. The refresh mechanism keeps an updated `ARES.md` live within the session.
 - Respect the **MVP scope contract** (`docs/context.md` §1): sub-agents, MCP, TODO planner,
   tree-sitter maps, multi-model routing, embeddings/RAG, and hooks are deferred. New scope goes to a

@@ -23,15 +23,23 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from arescode.config import BUILTIN_DEFAULT_MODEL, Config, read_last_model, save_last_model
-from arescode.core.context import INIT_INSTRUCTION, assemble_system_prompt, compact_now
+from arescode.core.context import (
+    ARES_MEMORY_FILENAME,
+    INIT_SYSTEM_PROMPT,
+    INIT_USER_TEMPLATE,
+    assemble_system_prompt,
+    compact_now,
+    gather_init_context,
+)
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
 from arescode.core.state import SessionState
-from arescode.permissions.gate import Gate
+from arescode.permissions.gate import Decision, Gate
+from arescode.providers.base import ProviderError
 from arescode.providers.ollama_admin import AdminUnavailable, ModelLoadError, OllamaAdmin
 from arescode.providers.openai_compat import OpenAICompatProvider
 from arescode.repo.repomap import build_repo_map
-from arescode.tools.registry import Executor
+from arescode.tools.registry import EditFileAction, Executor, SearchReplace, WriteFileAction
 from arescode.ui import render, theme
 from arescode.ui.approve import auto_approver, interactive_approver
 from arescode.ui.model_select import free_text_model, pick_model
@@ -269,6 +277,22 @@ def _map_structure(repo_map: str) -> list[str]:
     return [_MAP_SIZE_SUFFIX.sub("", line) for line in repo_map.splitlines()]
 
 
+# A whole-document code fence a model may wrap ARES.md in despite being told not to.
+_OUTER_FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```$", re.DOTALL)
+
+
+def _clean_ares_content(text: str) -> str:
+    """Strip a whole-document code fence the writer model sometimes adds around ARES.md.
+
+    Only an *outer* fence wrapping the entire response is removed (anchored match), so a legitimate
+    fenced example inside the document is left intact. The approval preview is the final backstop
+    against anything odd slipping through.
+    """
+    text = text.strip()
+    fenced = _OUTER_FENCE.match(text)
+    return fenced.group(1).strip() if fenced else text
+
+
 def _history_path() -> Path:
     directory = Path.home() / ".arescode"
     directory.mkdir(parents=True, exist_ok=True)
@@ -454,21 +478,25 @@ async def run(
     # Ctrl+C within DOUBLE_INTERRUPT_WINDOW exits, so "double Ctrl+C" works from either context.
     last_interrupt = 0.0
 
-    async def _agent_turn(message: str, *, turn_state: SessionState | None = None) -> bool:
-        """Run one agent turn for ``message``; returns True if the session should exit.
+    def _refresh_prompt_if_tree_changed(fs_gen_before: int) -> None:
+        """After anything that may have touched the tree, rescan so the next turn's system prompt
+        reflects new/renamed/deleted files and any ARES.md write, not the stale snapshot. Announce
+        only a real structural change, not size churn from in-place edits."""
+        nonlocal system_prompt, repo_map
+        if executor.fs_generation != fs_gen_before:
+            new_map, new_prompt = _build_prompt(project_dir)
+            if _map_structure(new_map) != _map_structure(repo_map):
+                render.note(console, "project files changed — repo map refreshed")
+            repo_map, system_prompt = new_map, new_prompt
 
-        ``turn_state`` defaults to the live session. Pass a throwaway state (e.g. for ``/init``) to
-        run a self-contained task without threading its instruction into the real conversation.
-        Shared by the normal message path and ``/init`` so both get Esc/Ctrl+C handling and the
-        post-turn repo-map refresh in one place.
-        """
-        nonlocal system_prompt, repo_map, last_interrupt
-        active_state = turn_state if turn_state is not None else state
+    async def _agent_turn(message: str) -> bool:
+        """Run one agent turn for ``message``; returns True if the session should exit."""
+        nonlocal last_interrupt
         fs_gen_before = executor.fs_generation  # to detect tree changes made during this turn
         task = asyncio.ensure_future(
             run_turn(
                 message,
-                state=active_state,
+                state=state,
                 provider=provider,
                 executor=executor,
                 system_prompt=system_prompt,
@@ -503,19 +531,71 @@ async def run(
 
         if should_exit:
             return True
-
-        # A tool changed (or may have changed) the tree this turn: rescan so the next turn's system
-        # prompt reflects new/renamed/deleted files and any ARES.md edits, instead of the stale
-        # session-start snapshot. Announce only a real structural change, not size churn from edits.
-        if executor.fs_generation != fs_gen_before:
-            new_map, new_prompt = _build_prompt(project_dir)
-            if _map_structure(new_map) != _map_structure(repo_map):
-                render.note(console, "project files changed — repo map refreshed")
-            repo_map, system_prompt = new_map, new_prompt
-
-        if active_state is state:  # never persist a throwaway /init state into the session file
-            state.save(project_dir)
+        _refresh_prompt_if_tree_changed(fs_gen_before)
+        state.save(project_dir)
         return False
+
+    async def _run_init() -> None:
+        """Author ARES.md model-side, harness-gathered and harness-persisted.
+
+        A single completion turns harness-gathered orientation (repo map + key files) into the
+        file's Markdown — NOT an agent loop, because weak models reliably write prose but not a
+        reliable write_file tool call across an exploration turn. The content is then written
+        through the normal gated write path (preview + approval), and the prompt is refreshed so the
+        new memory is live immediately.
+        """
+        render.note(console, "reading key files and drafting ARES.md…")
+        context_text = gather_init_context(project_dir, repo_map=repo_map)
+        messages = [
+            {"role": "system", "content": INIT_SYSTEM_PROMPT},
+            {"role": "user", "content": INIT_USER_TEMPLATE.format(context=context_text)},
+        ]
+        completion = asyncio.ensure_future(provider.complete(messages))
+        try:
+            with observer.thinking():
+                outcome = await _await_turn(completion)
+        except KeyboardInterrupt:
+            completion.cancel()
+            with suppress(asyncio.CancelledError, KeyboardInterrupt):
+                await completion
+            render.note(console, "/init cancelled")
+            return
+        except ProviderError as exc:
+            render.error(console, f"/init failed: {exc}")
+            return
+        if outcome == "escaped":
+            render.note(console, "/init interrupted (Esc)")
+            return
+
+        content = _clean_ares_content(completion.result())
+        if not content:
+            render.error(console, "/init: the model returned no usable ARES.md content")
+            return
+
+        # Persist through the gated write path so the user still previews + approves. write_file
+        # refuses to overwrite, so an existing ARES.md is replaced via a whole-file edit.
+        exists = (project_dir / ARES_MEMORY_FILENAME).exists()
+        action = (
+            EditFileAction(ARES_MEMORY_FILENAME, (SearchReplace("", content),))
+            if exists
+            else WriteFileAction(ARES_MEMORY_FILENAME, content)
+        )
+        verdict = gate.check(action)
+        if verdict.decision is Decision.DENY:
+            render.error(console, f"/init blocked: {verdict.reason}")
+            return
+        fs_gen_before = executor.fs_generation
+        if verdict.decision is not Decision.ALLOW:  # writes are ASK: preview + approve
+            approval = approver(action, verdict, executor.preview(action))
+            if not approval.approved:
+                render.note(console, "/init cancelled — ARES.md not written")
+                return
+        result = executor.run(action)
+        if not result.ok:
+            render.error(console, f"/init could not write ARES.md: {result.output}")
+            return
+        render.note(console, f"{'updated' if exists else 'created'} ARES.md — loaded into context")
+        _refresh_prompt_if_tree_changed(fs_gen_before)
 
     while True:
         try:
@@ -544,12 +624,7 @@ async def run(
                     console=console, target=command.model_target,
                 )
             if command.init:
-                # Model-driven /init: run the authoring task on a throwaway state so the big
-                # instruction never lands in the real conversation. The post-turn refresh picks up
-                # the freshly written ARES.md for the rest of the session.
-                render.note(console, "scanning the project to write ARES.md…")
-                if await _agent_turn(INIT_INSTRUCTION, turn_state=SessionState.new(state.model)):
-                    break
+                await _run_init()
             if command.toggle_verbose:
                 observer.verbose = not observer.verbose
                 render.note(console, f"verbose {'on' if observer.verbose else 'off'}")

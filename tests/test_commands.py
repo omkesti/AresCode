@@ -17,6 +17,7 @@ from arescode.ui.repl import (
     _await_turn,
     _build_key_bindings,
     _build_prompt,
+    _clean_ares_content,
     _map_structure,
     parse_command,
 )
@@ -69,6 +70,23 @@ def test_init_command_requests_authoring_turn():
     command = parse_command("/init", SessionState.new("m"), _console())
     assert command.init is True
     assert command.action == "continue"
+
+
+def test_clean_ares_content_strips_outer_fence():
+    wrapped = "```markdown\n# ARES.md\n\nBody.\n```"
+    assert _clean_ares_content(wrapped) == "# ARES.md\n\nBody."
+
+
+def test_clean_ares_content_keeps_inner_fences():
+    # A fenced example *inside* the document must survive (only a whole-doc wrapper is stripped).
+    doc = "# ARES.md\n\n## Commands\n\n```bash\npytest\n```\n"
+    assert _clean_ares_content(doc) == doc.strip()
+    assert "```bash" in _clean_ares_content(doc)
+
+
+def test_clean_ares_content_passthrough_plain_markdown():
+    plain = "# ARES.md\n\nNo fences here."
+    assert _clean_ares_content(plain) == plain
 
 
 def test_enter_submits_and_newline_keys_are_bound():

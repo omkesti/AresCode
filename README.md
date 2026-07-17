@@ -129,9 +129,9 @@ Input shortcuts:
 
 Drop an `ARES.md` file in your project root to give AresCode durable, project-specific context
 (conventions, key commands, gotchas). It is loaded into the system prompt on every turn. To have
-AresCode write it for you, run `/init` inside the session: the model explores the repo and authors
-`ARES.md` from what it actually reads — its write goes through the normal approval prompt — so the
-memory reflects the real project instead of a blank template. Re-run `/init` any time to refresh it.
+AresCode write it for you, run `/init` inside the session: AresCode gathers the project's key files
+(README, build config) and the repo map, the model drafts `ARES.md` from them, and you approve the
+write like any other. Re-run `/init` any time to refresh it.
 
 AresCode also builds a gitignore-filtered **repo map** at session start so the model knows the
 project's shape without spending tool calls. The map (and `ARES.md`) **stay current within a

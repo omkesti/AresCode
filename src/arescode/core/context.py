@@ -130,36 +130,75 @@ def assemble_system_prompt(
     return "\n\n".join(parts)
 
 
-# The task message behind the in-session ``/init`` command (context.md §4.5). Rather than writing a
-# static placeholder, ``/init`` runs an ordinary agent turn on this instruction so the *model*
-# explores the repo and authors ``ARES.md`` from what it actually read — the local-model analogue of
-# Claude Code's ``/init``. Deliberately explicit and staged, because a weak model needs the sections
-# spelled out and a firm "verify in a file, don't guess" rule.
-INIT_INSTRUCTION = f"""\
-Create or update this project's {ARES_MEMORY_FILENAME} — a short project-memory file that AresCode \
-loads into its system prompt every session, so future turns start already knowing the project.
+# --- /init: model authors the content, harness gathers + persists it (context.md §4.5) ------------
+# Weak local models reliably WRITE prose but do NOT reliably EMIT a write_file tool call across an
+# exploration loop (both 7B and 14B, given the agentic version, explored then drifted into
+# summarizing instead of writing). So /init is deliberately NOT an agent turn: the harness reads the
+# orientation files and the model produces the file's Markdown in a single completion, which the
+# REPL then writes through the normal gated path. This is the project's "fix the harness, not the
+# prompt" rule applied literally — the model only does the part it's good at.
 
-Work in two stages:
+INIT_SYSTEM_PROMPT = (
+    f"You are a precise technical writer producing {ARES_MEMORY_FILENAME}, a short project-memory "
+    "file that an AI coding agent loads into its context at the start of every session. You write "
+    "terse, accurate, high-signal GitHub-flavored Markdown grounded strictly in the material you "
+    "are given. You output ONLY the file's contents — no preamble, no sign-off, no wrapping code "
+    "fence, no tool calls."
+)
 
-1. EXPLORE. Learn the project from its actual files — do not guess from names. Read the README if \
-present, the package/build file (e.g. pyproject.toml, package.json, go.mod, Cargo.toml), the main \
-entry point, and a few core source files. Use glob/grep to find how the project is run, tested, \
-and linted.
+INIT_USER_TEMPLATE = f"""\
+Write the contents of {ARES_MEMORY_FILENAME} for this project. Base it ONLY on the repository \
+material below — do not invent commands, paths, or facts it does not support.
 
-2. WRITE. Then write {ARES_MEMORY_FILENAME} at the project root with write_file (or edit_file if \
-it already exists). Use these sections; fill each from what you actually read, and omit any that \
-truly do not apply:
-   - Overview: one paragraph on what the project is and its entry point.
-   - Where things are: the key directories/files and what each is for.
-   - Key commands: install, run, test, lint/format — the real commands, exactly.
-   - Conventions: language/framework/style rules; where new code and tests go.
-   - Notes: gotchas, required env vars, services that must be running.
+{{context}}
 
-Keep it concise and high-signal — aim for well under ~60 lines, since it is re-read on every turn \
-and every token is paid repeatedly. Invent nothing you did not verify in a file, and never write \
-the file with bash (echo >, cat >, tee, sed -i). When {ARES_MEMORY_FILENAME} is written, end your \
-turn with a one-line plain-text summary of what you captured.
+Produce the {ARES_MEMORY_FILENAME} content now, as Markdown, with these sections (omit any the \
+material does not support):
+- Overview: one paragraph on what the project is and its entry point.
+- Where things are: the key directories/files and what each is for.
+- Key commands: install, run, test, lint/format — the real commands.
+- Conventions: language/framework/style; where new code and tests go.
+- Notes: gotchas, required env vars, services that must be running.
+
+Keep it under ~60 lines. Output ONLY the file content — no preamble, no explanation, no code fence.
 """
+
+# Orientation files worth reading when they exist; the model sees these plus the repo map.
+_INIT_CONTEXT_FILES = (
+    "README.md", "README.rst", "README.txt",
+    "pyproject.toml", "setup.cfg", "setup.py", "package.json",
+    "go.mod", "Cargo.toml", "Makefile", "CONTRIBUTING.md",
+)
+_INIT_FILE_MAX_LINES = 160  # per-file head cap so one big README can't blow the window
+
+
+def gather_init_context(project_dir: Path | str, *, repo_map: str = "") -> str:
+    """Collect the orientation the ``/init`` writer turn reads: the repo map + key project files.
+
+    The harness does the exploring (reliable) so the model only has to synthesize (what it is good
+    at). Each file is head-truncated; absent files are skipped.
+    """
+    root = Path(project_dir)
+    parts: list[str] = []
+    if repo_map:
+        parts.append(f"### Repository structure (gitignore-filtered)\n\n{repo_map}")
+    seen: set[Path] = set()
+    for name in _INIT_CONTEXT_FILES:
+        path = root / name
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        seen.add(resolved)
+        lines = text.splitlines()
+        if len(lines) > _INIT_FILE_MAX_LINES:
+            omitted = len(lines) - _INIT_FILE_MAX_LINES
+            text = "\n".join(lines[:_INIT_FILE_MAX_LINES]) + f"\n... [{omitted} more lines]"
+        parts.append(f"### {name}\n\n{text}")
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
