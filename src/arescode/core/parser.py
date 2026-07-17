@@ -36,6 +36,17 @@ SR_RE = re.compile(
     re.DOTALL | re.MULTILINE | re.IGNORECASE,
 )
 
+# Bare-marker fallback: the labels SEARCH / REPLACE with NO git-conflict markers (tolerating
+# markdown bold or a trailing colon). Only ever applied inside a <tool>edit_file</tool> window (see
+# _parse_tool), so prose that merely mentions SEARCH/REPLACE is never mistaken for an edit. Absorbs
+# a real qwen2.5-coder:7b failure from the 6.5 dogfood (LATER.md): the model wrote the labels
+# without markers, so SR_RE missed the block and the edit was silently dropped.
+_BARE_SR_RE = re.compile(
+    r"^[ \t]*\*{0,2}[ \t]*SEARCH[ \t]*\*{0,2}[ \t]*:?[ \t]*$\n(.*?)"
+    r"^[ \t]*\*{0,2}[ \t]*REPLACE[ \t]*\*{0,2}[ \t]*:?[ \t]*$\n(.*)",
+    re.DOTALL | re.MULTILINE | re.IGNORECASE,
+)
+
 _PATHY = re.compile(r"^[\w./\\-]+$")
 _PATH_TAG = re.compile(r"<path>\s*(.*?)\s*</path>", re.IGNORECASE)
 
@@ -107,6 +118,13 @@ def _parse_tool(text: str, match: re.Match[str]) -> Action | None:
         path = _param(window, "path")
         content = _write_content(window)
         return WriteFileAction(path, content or "") if path else None
+    if name == "edit_file":
+        # A proper <<<<<<< SEARCH block is handled by SR_RE in parse(); this branch only rescues
+        # the bare-marker variant (no conflict markers), scoped to this tool's window so it can't
+        # misread prose. See _BARE_SR_RE / _bare_edit_block and the 6.5 dogfood note in LATER.md.
+        path = _param(window, "path")
+        edit = _bare_edit_block(window)
+        return EditFileAction(path, (edit,)) if (path and edit is not None) else None
     return None  # unknown tool name
 
 
@@ -174,6 +192,47 @@ def _write_content(window: str) -> str | None:
         if block.strip():
             return block
     return _param(window, "content")
+
+
+def _strip_blank_edges(text: str) -> str:
+    """Drop leading/trailing blank lines while preserving the first content line's indentation.
+
+    (A plain ``.strip()`` would eat the indentation of an indented method body and break the match.)
+    """
+    lines = text.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _unfence(chunk: str) -> str:
+    """One side of a bare edit: the first non-empty fenced block if it's fenced, else the raw text.
+
+    The bare-marker variant sometimes wraps each side in a ```lang ... ``` fence and sometimes
+    leaves it plain; either way we want just the code, blank edges trimmed.
+    """
+    for block in _fenced_blocks(chunk):
+        if block.strip():
+            return _strip_blank_edges(block)
+    return _strip_blank_edges(chunk)
+
+
+def _bare_edit_block(window: str) -> SearchReplace | None:
+    """Recover a SEARCH/REPLACE pair written with bare labels (no markers) — see _BARE_SR_RE.
+
+    Returns ``None`` when there is no bare block or the SEARCH side is empty: an empty bare SEARCH
+    is too ambiguous to trust here (a genuine whole-file/new-file edit uses markers or write_file),
+    so we decline rather than risk a spurious match.
+    """
+    m = _BARE_SR_RE.search(window)
+    if m is None:
+        return None
+    search = _unfence(m.group(1))
+    if not search:
+        return None
+    return SearchReplace(search, _unfence(m.group(2)))
 
 
 def _int(value: str | None) -> int | None:

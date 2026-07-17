@@ -3,7 +3,7 @@
 > A Claude Code–style terminal coding agent that runs entirely on local models via Ollama.
 > This document is the single source of truth for the project's goals, architecture, design decisions, and structure. Feed it to any AI assistant or new collaborator to get them fully up to speed.
 
-**Status:** Phases 0–6 complete. Phase 6 (Polish) shipped — slash commands (incl. `/sessions`, `/resume`), a first-run preflight, the error-path sweep, packaging (incl. bundling `prompts/system.md` in the wheel), `LATER.md`, and the dogfood gauntlet. **The MVP Definition of Done is met**: "fix the failing test" runs end-to-end on live `qwen2.5-coder:14b-instruct` (2026-07-17). Open follow-up: edit reliability on the 7b default (a bare-marker parser gap, logged in `LATER.md`) and a broader dogfood sweep.
+**Status:** Phases 0–6 complete. Phase 6 (Polish) shipped — slash commands (incl. `/sessions`, `/resume`), a first-run preflight, the error-path sweep, packaging (incl. bundling `prompts/system.md` in the wheel), `LATER.md`, and the dogfood gauntlet. **The MVP Definition of Done is met**: "fix the failing test" runs end-to-end on live `qwen2.5-coder:14b-instruct` **and** `qwen2.5-coder:7b` (2026-07-17) — a bare-marker parser gap that first blocked the 7b was fixed and re-verified. Open follow-ups (non-blocking): a broader multi-task dogfood sweep, the D11 edit-success re-baseline, and a renderer robustness fix for non-UTF-8 stdout (all logged in `LATER.md`).
 **Name:** `AresCode`
 **Default model:** `qwen2.5-coder:7b` via Ollama (low-VRAM-safe out of the box); `qwen2.5-coder:14b-instruct` is the stronger opt-in — switch at runtime with `/model` and it is remembered as the default from the next launch on (D13)
 **Author:** Om — solo project
