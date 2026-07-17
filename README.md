@@ -121,7 +121,8 @@ Input shortcuts:
 | Enter | Send the message. |
 | \ + Enter | Insert a newline (end the line with a backslash to continue). |
 | Ctrl+J | Insert a newline (fallback). |
-| Ctrl+C | Cancel the current turn. |
+| Esc | Interrupt the current turn and return to the prompt. |
+| Ctrl+C | Interrupt the current turn; press twice in a row to exit. |
 | Ctrl+D | Exit. |
 
 ## Project memory

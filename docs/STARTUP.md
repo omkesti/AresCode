@@ -158,7 +158,10 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 | `/compact` | summarize older history now to reclaim context budget |
 | `/allow [cmd]` | no arg: show the allowlist; with a token: always allow that bash command |
 | `/deny <cmd>` | remove a bash command from the session allowlist |
-| `/exit`, `/quit` | leave (or press **Ctrl+D**) |
+| `/exit`, `/quit` | leave (or press **Ctrl+D**, or **Ctrl+C** twice in a row) |
+
+While a turn is running, press **Esc** (or **Ctrl+C** once) to interrupt it and return to the
+prompt; the session stays alive.
 
 When the agent proposes a write, edit, or shell command, the gate prompts with a preview:
 press **y** (once), **n** (decline), or **a** (always — remember this file or command for the

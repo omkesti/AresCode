@@ -2,13 +2,16 @@
 
 Enter sends; a trailing backslash before Enter (or Ctrl+J) inserts a newline. Each message
 runs the agent loop (the model can read files, search, and run commands), rendered as a tool
-trace. Ctrl+C cancels the current turn without killing the session; Ctrl+D exits
-(context.md §3, TASKS 1.3 / 1.6 / 2.8).
+trace. Esc or Ctrl+C interrupts the current turn without killing the session; two Ctrl+C in a
+row (or Ctrl+D) exits (context.md §3, TASKS 1.3 / 1.6 / 2.8).
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
+import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -36,6 +39,10 @@ from arescode.ui.model_select import free_text_model, pick_model
 # formatted-text tuples, since rich markup means nothing to PromptSession.
 PROMPT_MESSAGE = [("", "\n"), (f"fg:{theme.PRIMARY} bold", "> ")]
 
+# Two Ctrl+C within this many seconds exits AresCode; a lone Ctrl+C only cancels the current turn
+# (or, at an idle prompt, arms the exit and prints a hint).
+DOUBLE_INTERRUPT_WINDOW = 1.5
+
 HELP_TEXT = """\
 Commands:
   /help            show this help
@@ -53,7 +60,8 @@ Input:
   Enter            send the message
   \\ + Enter        insert a newline (end the line with a backslash to continue)
   Ctrl+J           insert a newline (also Alt+Enter where the terminal allows it)
-  Ctrl+C           cancel the current turn
+  Esc              interrupt the current turn and return to the prompt
+  Ctrl+C           interrupt the current turn; press twice in a row to exit
   Ctrl+D           exit
 """
 
@@ -146,6 +154,91 @@ def _build_key_bindings() -> KeyBindings:
         event.current_buffer.insert_text("\n")
 
     return kb
+
+
+async def _watch_for_escape() -> None:
+    """Resolve as soon as the user presses Esc.
+
+    Runs only while a turn is in flight — never concurrently with prompt_toolkit — so it can own
+    stdin for the duration. Other keystrokes typed while the model works are swallowed (they would
+    otherwise leak into the next prompt). If keys can't be watched here (stdin isn't an interactive
+    terminal, or the platform read fails) it waits forever, disabling Esc but leaving Ctrl+C as the
+    escape hatch.
+    """
+    try:
+        if sys.platform == "win32":
+            await _watch_for_escape_windows()
+        else:
+            await _watch_for_escape_posix()
+    except (OSError, ValueError, ImportError):
+        await asyncio.Event().wait()
+
+
+async def _watch_for_escape_windows() -> None:
+    import msvcrt
+
+    esc = "\x1b"
+    while True:
+        while msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch == esc:
+                return
+            if ch in ("\x00", "\xe0") and msvcrt.kbhit():
+                msvcrt.getwch()  # drop the second half of a function/arrow key
+        await asyncio.sleep(0.02)
+
+
+async def _watch_for_escape_posix() -> None:
+    import os
+    import termios
+    import tty
+
+    if not sys.stdin.isatty():
+        await asyncio.Event().wait()
+        return
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    loop = asyncio.get_running_loop()
+    seen = asyncio.Event()
+
+    def _on_readable() -> None:
+        try:
+            data = os.read(fd, 1024)
+        except OSError:
+            data = b""
+        if b"\x1b" in data:
+            seen.set()
+
+    try:
+        tty.setcbreak(fd)
+        loop.add_reader(fd, _on_readable)
+        await seen.wait()
+    finally:
+        loop.remove_reader(fd)
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+async def _await_turn(task: asyncio.Future) -> str:
+    """Await a running turn, cancelling it if the user presses Esc.
+
+    Returns ``"escaped"`` when Esc interrupted the turn, else ``"done"`` (re-raising whatever the
+    turn itself raised). A Ctrl+C (KeyboardInterrupt) propagates to the caller, which owns the
+    cancel-vs-exit decision.
+    """
+    watcher = asyncio.ensure_future(_watch_for_escape())
+    try:
+        done, _ = await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task  # surface the turn's result / exception
+            return "done"
+        task.cancel()  # Esc fired first
+        with suppress(asyncio.CancelledError, KeyboardInterrupt):
+            await task
+        return "escaped"
+    finally:
+        watcher.cancel()
+        with suppress(asyncio.CancelledError, KeyboardInterrupt):
+            await watcher
 
 
 def _history_path() -> Path:
@@ -330,12 +423,21 @@ async def run(
         key_bindings=_build_key_bindings(),
     )
 
+    # Timestamp of the last Ctrl+C, shared across the prompt and the in-turn handler: a second
+    # Ctrl+C within DOUBLE_INTERRUPT_WINDOW exits, so "double Ctrl+C" works from either context.
+    last_interrupt = 0.0
+
     while True:
         try:
             user_input = await prompt_session.prompt_async(PROMPT_MESSAGE)
-        except EOFError:  # Ctrl+D
+        except EOFError:  # Ctrl+D still exits
             break
-        except KeyboardInterrupt:  # Ctrl+C at an empty prompt
+        except KeyboardInterrupt:  # Ctrl+C at the prompt: press again quickly to exit
+            now = time.monotonic()
+            if now - last_interrupt < DOUBLE_INTERRUPT_WINDOW:
+                break
+            last_interrupt = now
+            render.note(console, "press Ctrl+C again to exit")
             continue
 
         user_input = user_input.strip()
@@ -400,18 +502,27 @@ async def run(
         # Block a model switch while a turn is in flight (context.md: REPL-idle only). Belt-and-
         # suspenders: /model is handled between turns anyway, but this makes the guard explicit.
         manager.busy = True
+        should_exit = False
         try:
-            await task
+            # Esc interrupts the turn and drops back to the prompt (races a key-watcher against the
+            # turn and cancels it on Esc). Ctrl+C also interrupts; a quick second Ctrl+C exits.
+            if await _await_turn(task) == "escaped":
+                render.note(console, "interrupted (Esc)")
         except KeyboardInterrupt:  # Ctrl+C mid-turn: cancel, keep the session
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError, KeyboardInterrupt):
                 await task
-            except (asyncio.CancelledError, KeyboardInterrupt):
-                pass
-            render.note(console, "cancelled")
+            now = time.monotonic()
+            if now - last_interrupt < DOUBLE_INTERRUPT_WINDOW:
+                should_exit = True  # second Ctrl+C in quick succession -> leave
+            else:
+                last_interrupt = now
+                render.note(console, "cancelled (Ctrl+C again to exit)")
         finally:
             manager.busy = False
 
+        if should_exit:
+            break
         state.save(project_dir)
 
     if executor.stats.attempts:

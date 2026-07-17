@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 from types import SimpleNamespace
 
+import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.keys import Keys
 from rich.console import Console
 
+import arescode.ui.repl as repl_mod
 from arescode.core.state import SessionState
-from arescode.ui.repl import _build_key_bindings, parse_command
+from arescode.ui.repl import _await_turn, _build_key_bindings, parse_command
 
 
 def _console() -> Console:
@@ -142,3 +145,46 @@ def test_deny_without_arg_is_noop():
     command = parse_command("/deny", SessionState.new("m"), _console())
     assert command.action == "continue"
     assert command.deny is None
+
+
+async def _never_escape() -> None:
+    await asyncio.Event().wait()
+
+
+async def test_await_turn_returns_done_when_turn_finishes(monkeypatch):
+    # No Esc -> the turn runs to completion and its result is surfaced.
+    monkeypatch.setattr(repl_mod, "_watch_for_escape", _never_escape)
+
+    async def _turn() -> str:
+        return "answer"
+
+    task = asyncio.ensure_future(_turn())
+    assert await _await_turn(task) == "done"
+    assert task.result() == "answer"
+
+
+async def test_await_turn_propagates_turn_error(monkeypatch):
+    # A turn that raises must surface its exception, not be swallowed as an escape.
+    monkeypatch.setattr(repl_mod, "_watch_for_escape", _never_escape)
+
+    async def _boom() -> None:
+        raise RuntimeError("kaboom")
+
+    task = asyncio.ensure_future(_boom())
+    with pytest.raises(RuntimeError, match="kaboom"):
+        await _await_turn(task)
+
+
+async def test_await_turn_escapes_and_cancels_on_esc(monkeypatch):
+    # Esc fires first -> the in-flight turn is cancelled and control returns immediately.
+    async def _escape_now() -> None:
+        return
+
+    monkeypatch.setattr(repl_mod, "_watch_for_escape", _escape_now)
+
+    async def _long_turn() -> None:
+        await asyncio.sleep(60)
+
+    task = asyncio.ensure_future(_long_turn())
+    assert await _await_turn(task) == "escaped"
+    assert task.cancelled()
