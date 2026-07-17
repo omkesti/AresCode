@@ -21,6 +21,7 @@ from typing import Literal
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
 from rich.console import Console
 
 from arescode.config import BUILTIN_DEFAULT_MODEL, Config, read_last_model, save_last_model
@@ -45,9 +46,47 @@ from arescode.ui import render, theme
 from arescode.ui.approve import auto_approver, interactive_approver
 from arescode.ui.model_select import free_text_model, pick_model
 
-# The input prompt, Claude Code-style: a bare '>' in the brand purple. prompt_toolkit
-# formatted-text tuples, since rich markup means nothing to PromptSession.
-PROMPT_MESSAGE = [("", "\n"), (f"fg:{theme.PRIMARY} bold", "> ")]
+# The input box chrome (UX tasks 1-2): the prompt sits between two dim horizontal rules — a top
+# rule carried in the prompt message and a bottom rule pinned just under the input via
+# prompt_toolkit's bottom_toolbar. Because the toolbar stays put while the buffer above it grows,
+# the box expands upward (the top rule slides up) as the input wraps onto more lines. Both are
+# callables, re-evaluated every render, so the rules track the terminal width through live resizes.
+# Formatted-text tuples, since rich markup means nothing to PromptSession.
+RULE_CHAR = "─"
+
+
+def _hrule() -> str:
+    """A horizontal rule string sized to the current terminal width."""
+    return RULE_CHAR * max(1, shutil.get_terminal_size((80, 24)).columns)
+
+
+def _prompt_message() -> list[tuple[str, str]]:
+    """Prompt text: a blank spacer, the top rule on its own line, then the brand-purple '> '.
+
+    prompt_toolkit splits a multiline message at the last newline: everything before it renders as
+    the block above the input (giving the rule its own line) and the trailing '> ' becomes the
+    inline prefix on the first input line.
+    """
+    return [
+        ("", "\n"),
+        (f"fg:{theme.SHADOW}", _hrule()),
+        ("", "\n"),
+        (f"fg:{theme.PRIMARY} bold", "> "),
+    ]
+
+
+def _bottom_rule() -> list[tuple[str, str]]:
+    """The bottom rule of the input box; a bottom_toolbar, so it stays put as the input grows."""
+    return [(f"fg:{theme.SHADOW}", _hrule())]
+
+
+# Drop prompt_toolkit's default reverse-video bar so the bottom_toolbar reads as a thin rule.
+_PROMPT_STYLE = Style.from_dict(
+    {
+        "bottom-toolbar": f"noreverse fg:{theme.SHADOW} bg:default",
+        "bottom-toolbar.text": f"noreverse fg:{theme.SHADOW} bg:default",
+    }
+)
 
 # Two Ctrl+C within this many seconds exits AresCode; a lone Ctrl+C only cancels the current turn
 # (or, at an idle prompt, arms the exit and prints a hint).
@@ -111,7 +150,7 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         return Command(action="continue")
     if name == "/clear":
         state.clear()
-        render.note(console, "history cleared")
+        render.cleared(console)
         return Command(action="continue")
     if name == "/init":
         return Command(action="continue", init=True)
@@ -539,6 +578,7 @@ async def run(
 ) -> None:
     """Run the interactive agent loop until the user exits."""
     console = Console()
+    console.clear()  # start the session from a clean, top-anchored screen (UX task 3)
     gate = Gate.from_config(project_dir, config)
     approver = auto_approver(console) if yolo else interactive_approver(console)
     # The loop runs the interactive gate (allow/ask/approve); the executor shares the same gate as
@@ -560,11 +600,13 @@ async def run(
     provider = OpenAICompatProvider.from_config(config)
     executor.active_model = state.model
 
+    render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
+
     # First-run check: surface a down server / missing model / absent ripgrep with the exact fix,
     # before the user types and hits it as a turn error (TASKS 6.2). Best-effort, never fatal.
+    # Printed under the banner so the wordmark stays anchored at the top (UX task 3).
     await _preflight(manager, state.model, config.base_url, console)
 
-    render.banner(console, model=state.model, num_ctx=config.num_ctx, project_dir=str(project_dir))
     if yolo:
         console.print(
             "[bold red]--yolo: every action auto-approved. "
@@ -575,6 +617,8 @@ async def run(
         history=FileHistory(str(_history_path())),
         multiline=True,
         key_bindings=_build_key_bindings(),
+        bottom_toolbar=_bottom_rule,
+        style=_PROMPT_STYLE,
     )
 
     # Timestamp of the last Ctrl+C, shared across the prompt and the in-turn handler: a second
@@ -702,7 +746,7 @@ async def run(
 
     while True:
         try:
-            user_input = await prompt_session.prompt_async(PROMPT_MESSAGE)
+            user_input = await prompt_session.prompt_async(_prompt_message)
         except EOFError:  # Ctrl+D still exits
             break
         except KeyboardInterrupt:  # Ctrl+C at the prompt: press again quickly to exit

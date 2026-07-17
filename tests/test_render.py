@@ -7,7 +7,7 @@ import io
 from rich.console import Console
 
 from arescode.tools.registry import GlobAction, ReadFileAction, ToolResult
-from arescode.ui.render import PREVIEW_LINES, ConsoleObserver
+from arescode.ui.render import PREVIEW_LINES, ConsoleObserver, cleared
 
 
 def _observer(*, verbose: bool = False) -> tuple[ConsoleObserver, Console]:
@@ -50,3 +50,13 @@ def test_tool_end_previews_error_output() -> None:
     obs.tool_end(ReadFileAction(path="nope.py"), result, 0.1)
     out = console.file.getvalue()
     assert "file not found" in out  # errors are now visible too, not just summarized
+
+
+def test_cleared_shows_only_the_wordmark_and_a_notice() -> None:
+    # /clear wipes the screen and leaves the wordmark plus a cleared notice (UX task 4).
+    console = Console(file=io.StringIO(), width=100, force_terminal=False, color_system=None)
+    cleared(console)
+    out = console.file.getvalue()
+    assert "█" in out  # the wordmark rendered
+    assert "cleared" in out  # the conversation-cleared notice
+    assert "Welcome to AresCode" not in out  # only the wordmark, not the full banner

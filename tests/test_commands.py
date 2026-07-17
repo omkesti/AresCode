@@ -143,6 +143,24 @@ def test_enter_without_backslash_submits():
     assert buffer.text == "send me"  # unchanged
 
 
+def test_prompt_message_brackets_input_with_a_top_rule():
+    # The prompt is the top rule on its own line, then the inline '> ' (UX tasks 1-2).
+    msg = repl_mod._prompt_message()
+    assert msg[-1][1] == "> "  # trailing inline prompt
+    assert msg[-1][0].endswith("bold")  # in the brand colour, bold
+    assert any(repl_mod.RULE_CHAR in text for _style, text in msg)  # a rule sits above it
+    # There is a newline between the rule fragment and the '> ' so the rule gets its own line.
+    assert msg[-2] == ("", "\n")
+
+
+def test_bottom_rule_is_a_solid_full_width_rule():
+    # The bottom_toolbar rule: a single fragment of rule characters, nothing else.
+    rule = repl_mod._bottom_rule()
+    assert len(rule) == 1
+    _style, text = rule[0]
+    assert text and set(text) == {repl_mod.RULE_CHAR}
+
+
 def test_verbose_command_toggles():
     state = SessionState.new("m")
     command = parse_command("/verbose", state, _console())

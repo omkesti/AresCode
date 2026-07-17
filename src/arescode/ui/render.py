@@ -47,6 +47,12 @@ _NOTES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _print_wordmark(console: Console) -> None:
+    """Print the stacked ARES/CODE block-letter wordmark, line by line."""
+    for line in theme.logo_lines():
+        console.print(line)
+
+
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
     """The Claude Code-style welcome screen: boxed greeting, wordmark, session info, notes."""
     console.print()
@@ -54,8 +60,7 @@ def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> N
     console.print(Panel(greeting, box=box.ROUNDED, border_style=theme.PRIMARY,
                         expand=False, padding=(0, 1)))
     console.print()
-    for line in theme.logo_lines():
-        console.print(line)
+    _print_wordmark(console)
     console.print()
     console.print(
         f"  model: [{theme.PRIMARY_LIGHT}]{model}[/]  [dim]num_ctx={num_ctx}[/dim]"
@@ -69,6 +74,20 @@ def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> N
         console.print(f"     [dim]{detail}[/dim]")
     console.print()
     console.print(f"  [{theme.PRIMARY_LIGHT}]Type a request and press Enter to begin...[/]")
+
+
+def cleared(console: Console) -> None:
+    """Reset the screen to a fresh, top-anchored wordmark after ``/clear`` (UX task 4).
+
+    The conversation history is gone, so wipe the scrollback and leave only the wordmark at the
+    top: the screen visibly reflects the cleared state, and the next prompt opens its input box
+    below it.
+    """
+    console.clear()
+    console.print()
+    _print_wordmark(console)
+    console.print()
+    note(console, "conversation cleared")
 
 
 def note(console: Console, message: str) -> None:
