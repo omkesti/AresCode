@@ -50,9 +50,7 @@ _NOTES: tuple[tuple[str, str], ...] = (
 def banner(console: Console, *, model: str, num_ctx: int, project_dir: str) -> None:
     """The Claude Code-style welcome screen: boxed greeting, wordmark, session info, notes."""
     console.print()
-    greeting = Text.from_markup(
-        f"[{theme.PRIMARY}]✳[/] Welcome to [bold]AresCode[/bold]!"
-    )
+    greeting = Text.from_markup("Welcome to [bold]AresCode[/bold]!")
     console.print(Panel(greeting, box=box.ROUNDED, border_style=theme.PRIMARY,
                         expand=False, padding=(0, 1)))
     console.print()
@@ -113,9 +111,7 @@ class ConsoleObserver:
         self.verbose = verbose
 
     def thinking(self) -> AbstractContextManager:
-        return self.console.status(
-            f"[{theme.PRIMARY}]✳[/] [dim]thinking...[/dim]", spinner="dots"
-        )
+        return self.console.status("[dim]thinking...[/dim]", spinner="dots")
 
     def assistant_text(self, text: str) -> None:
         # The model's between-step reasoning; shown dimmed so tool traces stand out.

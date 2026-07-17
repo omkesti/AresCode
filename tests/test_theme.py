@@ -13,7 +13,7 @@ from arescode.ui.render import banner
 def test_glyphs_are_uniform_grids() -> None:
     for letter, glyph in theme._LETTERS.items():
         assert len(glyph) == 5, f"{letter} should be 5 rows"
-        assert all(len(row) == 5 for row in glyph), f"{letter} rows should be 5 cells"
+        assert all(len(row) == 4 for row in glyph), f"{letter} rows should be 4 cells"
         assert all(set(row) <= {"X", "."} for row in glyph), f"{letter} has stray cells"
 
 

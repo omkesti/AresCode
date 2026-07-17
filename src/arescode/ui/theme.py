@@ -20,68 +20,63 @@ SHADOW = "#6B24B2"
 ACCENT = PRIMARY
 ACCENT_BOLD = f"bold {PRIMARY}"
 
-# 5x5 pixel font for the wordmark. Only the letters the brand needs; each glyph is a
-# 5-row grid of 'X' (filled) and '.' (empty) cells, rendered two characters per cell
-# so the pixels come out square in a terminal.
+# 4x5 pixel font for the wordmark, matching the reference art: chunky flat-topped
+# letters slightly taller than wide. Each glyph is a 5-row grid of 'X' (filled) and
+# '.' (empty) cells, rendered two characters per cell so the pixels come out square
+# in a terminal. Only the letters the brand needs.
 _LETTERS: dict[str, tuple[str, ...]] = {
     "A": (
-        ".XXX.",
-        "X...X",
-        "XXXXX",
-        "X...X",
-        "X...X",
+        "XXXX",
+        "X..X",
+        "XXXX",
+        "X..X",
+        "X..X",
     ),
     "R": (
-        "XXXX.",
-        "X...X",
-        "XXXX.",
-        "X..X.",
-        "X...X",
+        "XXXX",
+        "X..X",
+        "XXX.",
+        "X..X",
+        "X..X",
     ),
     "E": (
-        "XXXXX",
-        "X....",
-        "XXXX.",
-        "X....",
-        "XXXXX",
+        "XXXX",
+        "X...",
+        "XXX.",
+        "X...",
+        "XXXX",
     ),
     "S": (
-        ".XXXX",
-        "X....",
-        ".XXX.",
-        "....X",
-        "XXXX.",
+        "XXXX",
+        "X...",
+        "XXXX",
+        "...X",
+        "XXXX",
     ),
     "C": (
-        ".XXXX",
-        "X....",
-        "X....",
-        "X....",
-        ".XXXX",
+        "XXXX",
+        "X...",
+        "X...",
+        "X...",
+        "XXXX",
     ),
     "O": (
-        ".XXX.",
-        "X...X",
-        "X...X",
-        "X...X",
-        ".XXX.",
+        "XXXX",
+        "X..X",
+        "X..X",
+        "X..X",
+        "XXXX",
     ),
     "D": (
-        "XXXX.",
-        "X...X",
-        "X...X",
-        "X...X",
-        "XXXX.",
+        "XXX.",
+        "X..X",
+        "X..X",
+        "X..X",
+        "XXX.",
     ),
 }
 
 _GLYPH_ROWS = 5
-_PIXEL = "██"
-# Light-shade blocks for the drop shadow so the letterforms stay crisp: a solid shadow
-# touching the glyphs diagonally reads as bolder mush, while ░░ reads as the outline
-# offset in the reference art — and keeps the logo legible even on monochrome terminals.
-_SHADOW_PIXEL = "░░"
-_BLANK = "  "
 
 
 def _filled_cells(word: str) -> tuple[set[tuple[int, int]], int]:
@@ -99,19 +94,22 @@ def _filled_cells(word: str) -> tuple[set[tuple[int, int]], int]:
 
 
 def word_lines(word: str, *, indent: int = 2) -> list[Text]:
-    """Render ``word`` as pixel-art lines: PRIMARY glyphs over a SHADOW copy offset
-    one cell down-right, the same drop-shadow effect as the Claude Code wordmark."""
+    """Render ``word`` as pixel-art lines: PRIMARY glyphs over a SHADOW copy offset one
+    row down and one *character* (half a pixel cell) left, the tight outline-peek of the
+    reference art. Compositing runs at character resolution — a cell is two characters
+    wide, and a full-cell offset reads as far too detached — with ░ for the shadow so
+    the letterforms stay crisp even where color is unavailable."""
     filled, width = _filled_cells(word)
     lines: list[Text] = []
     for r in range(_GLYPH_ROWS + 1):  # +1 row so the shadow's bottom edge fits
         line = Text(" " * indent)
-        for c in range(width + 1):  # +1 col for the shadow's right edge
-            if (r, c) in filled:
-                line.append(_PIXEL, style=PRIMARY)
-            elif (r - 1, c - 1) in filled:
-                line.append(_SHADOW_PIXEL, style=SHADOW)
+        for x in range(-1, width * 2):  # from -1: the shadow juts one char left
+            if x >= 0 and (r, x // 2) in filled:
+                line.append("█", style=PRIMARY)
+            elif (r - 1, (x + 1) // 2) in filled:
+                line.append("░", style=SHADOW)
             else:
-                line.append(_BLANK)
+                line.append(" ")
         lines.append(line)
     return lines
 
