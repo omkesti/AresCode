@@ -17,8 +17,9 @@ captures what actively shapes day-to-day work.
 
 - **Phases 0–5 are complete and verified** (M1 Talk, M2 Act, M3 Edit, M4 Trust, M5 Endure).
 - Working today: layered config (incl. a **remembered model default** — D13), the CLI entry point
-  (`arescode`, plus `arescode init`), an OpenAI-compatible **streaming provider**
-  over Ollama, an interactive **REPL** (slash commands, live markdown), **session save/resume**,
+  (`arescode`; project memory is authored in-session with `/init`), an OpenAI-compatible
+  **streaming provider** over Ollama, an interactive **REPL** (slash commands, live markdown),
+  **session save/resume**,
   the **lenient parser + read-only tools + master loop**, the **SEARCH/REPLACE edit cascade**
   (retry + whole-file fallback + telemetry), the **deny-first permission gate** (auto-allow
   reads, ask-with-preview for writes/shell, hard-deny path escapes + a command blocklist, session
@@ -113,7 +114,9 @@ without removing the reason the floor exists.
   in TASKS 1.3), because Windows Terminal swallows Alt+Enter as its fullscreen toggle. Don't revert
   Enter-sends.
 - **Project memory file is `ARES.md`** (AresCode's equivalent of CLAUDE.md), loaded into the system
-  prompt when present; Phase 5 adds support and an `arescode init` template generator.
+  prompt when present. It is **model-authored in-session via `/init`** (a normal agent turn on
+  `INIT_INSTRUCTION` that explores the repo and writes the file) — not a static CLI scaffold; do not
+  hand-maintain it. The refresh mechanism keeps an updated `ARES.md` live within the session.
 - Respect the **MVP scope contract** (`docs/context.md` §1): sub-agents, MCP, TODO planner,
   tree-sitter maps, multi-model routing, embeddings/RAG, and hooks are deferred. New scope goes to a
   `LATER.md`, not into the MVP.

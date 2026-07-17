@@ -161,6 +161,10 @@ class Executor:
     active_model: str = ""  # tags the model that produced each edit; set by ModelManager on switch
     stats_by_model: dict[str, EditStats] = field(default_factory=dict)
     _edit_failures: dict[str, int] = field(default_factory=dict)
+    # Monotonic "the working tree may have changed" counter. Bumped by a successful write/edit and
+    # by any bash run (bash can create/rename/delete files in ways we can't cheaply predict). The
+    # REPL watches it to know when to rescan the repo map / reload ARES.md (staleness fix).
+    fs_generation: int = 0
 
     def __post_init__(self) -> None:
         if not self.active_model:
@@ -231,6 +235,7 @@ class Executor:
             return ToolResult("glob", True, self._clamp(out), summary=f"{n} file(s)")
         if isinstance(action, BashAction):
             res = run_bash(action.cmd, self.project_dir, timeout=self.config.bash_timeout)
+            self.fs_generation += 1  # bash may have touched the tree; flag a rescan conservatively
             return ToolResult("bash", res.exit_code == 0, self._clamp(res.output),
                               summary=f"exit {res.exit_code}")
         if isinstance(action, EditFileAction):
@@ -240,10 +245,14 @@ class Executor:
                 self._stats_for(self.active_model), prior_failures=prior,
             )
             self._edit_failures[action.path] = 0 if res.ok else prior + 1
+            if res.ok:
+                self.fs_generation += 1
             summary = res.tier or ("ok" if res.ok else "no match")
             return ToolResult("edit_file", res.ok, res.message, summary=summary, diff=res.diff)
         if isinstance(action, WriteFileAction):
             res = write_new_file(self.project_dir, action.path, action.content)
+            if res.ok:
+                self.fs_generation += 1
             return ToolResult(
                 "write_file", res.ok, res.message,
                 summary="created" if res.ok else "refused", diff=res.diff,

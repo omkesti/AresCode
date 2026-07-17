@@ -13,7 +13,13 @@ from rich.console import Console
 
 import arescode.ui.repl as repl_mod
 from arescode.core.state import SessionState
-from arescode.ui.repl import _await_turn, _build_key_bindings, parse_command
+from arescode.ui.repl import (
+    _await_turn,
+    _build_key_bindings,
+    _build_prompt,
+    _map_structure,
+    parse_command,
+)
 
 
 def _console() -> Console:
@@ -57,6 +63,12 @@ def test_help_and_unknown_continue():
     state = SessionState.new("m")
     assert parse_command("/help", state, _console()).action == "continue"
     assert parse_command("/bogus", state, _console()).action == "continue"
+
+
+def test_init_command_requests_authoring_turn():
+    command = parse_command("/init", SessionState.new("m"), _console())
+    assert command.init is True
+    assert command.action == "continue"
 
 
 def test_enter_submits_and_newline_keys_are_bound():
@@ -188,3 +200,34 @@ async def test_await_turn_escapes_and_cancels_on_esc(monkeypatch):
     task = asyncio.ensure_future(_long_turn())
     assert await _await_turn(task) == "escaped"
     assert task.cancelled()
+
+
+# --- repo-map refresh helpers (mid-session staleness fix) ---------------------------------
+
+
+def test_map_structure_ignores_size_churn():
+    # Editing a file changes its rendered size but not the project's shape -> same structure.
+    before = "core/\n  loop.py  1.2K\nmain.py  800B"
+    after = "core/\n  loop.py  3.4K\nmain.py  810B"
+    assert _map_structure(before) == _map_structure(after)
+
+
+def test_map_structure_detects_added_and_removed_files():
+    base = "main.py  800B"
+    assert _map_structure(base) != _map_structure(base + "\nextra.py  10B")  # added
+    assert _map_structure(base + "\nextra.py  10B") != _map_structure(base)  # removed
+
+
+def test_build_prompt_reflects_current_tree_and_ares_memory(tmp_path):
+    (tmp_path / "hello.py").write_text("print('hi')\n")
+    (tmp_path / "ARES.md").write_text("# Memory\nProject-specific note.\n")
+    repo_map, system_prompt = _build_prompt(tmp_path)
+    assert "hello.py" in repo_map  # freshly scanned from disk
+    assert "hello.py" in system_prompt  # the map is embedded in the prompt
+    assert "Project-specific note." in system_prompt  # ARES.md memory is injected
+
+    # A file added after the first build shows up on the next build (no relaunch needed).
+    (tmp_path / "world.py").write_text("print('bye')\n")
+    repo_map_2, _ = _build_prompt(tmp_path)
+    assert "world.py" in repo_map_2
+    assert _map_structure(repo_map) != _map_structure(repo_map_2)

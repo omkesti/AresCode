@@ -8,10 +8,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from arescode.core.context import (
+    ARES_MEMORY_FILENAME,
+    INIT_INSTRUCTION,
     REPLY_RESERVE_TOKENS,
     SUMMARY_PREFIX,
     _fold,
-    ares_template,
     assemble_system_prompt,
     budget_for,
     compact_now,
@@ -85,11 +86,11 @@ def test_assemble_omits_absent_sections(tmp_path):
     assert assemble_system_prompt(tmp_path, base_prompt="BASE", memory="", repo_map="") == "BASE"
 
 
-def test_ares_template_scaffold(tmp_path):
-    text = ares_template(tmp_path)
-    assert "ARES.md" in text
-    assert "Key commands" in text
-    assert tmp_path.name in text
+def test_init_instruction_targets_ares_md():
+    # The /init task message must name the memory file and drive an explore-then-write flow.
+    assert ARES_MEMORY_FILENAME in INIT_INSTRUCTION
+    assert "write_file" in INIT_INSTRUCTION
+    assert "EXPLORE" in INIT_INSTRUCTION and "WRITE" in INIT_INSTRUCTION
 
 
 # --- compaction pure helper (5.4) ------------------------------------------

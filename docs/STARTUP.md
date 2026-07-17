@@ -8,7 +8,7 @@ normally use them. Commands are given for **Windows PowerShell** (primary) with 
 > writes/edits and shell prompt for a single-keystroke `y/n/a` with a change preview; path escapes
 > and a command blocklist hard-denied; `--yolo` auto-approves), AresCode now manages context for
 > long sessions: a gitignore-filtered **repo map** and an optional **`ARES.md`** project memory are
-> injected into the system prompt (`arescode init` scaffolds `ARES.md`; `/map` shows the map), and
+> injected into the system prompt (`/init` has the model author `ARES.md`; `/map` shows the map), and
 > history is **compacted** by summarizing the oldest turns once it passes 75% of the token budget
 > (`/compact` forces it). See [`TASKS.md`](TASKS.md) for the roadmap and
 > [`context.md`](context.md) for architecture.
@@ -138,12 +138,6 @@ arescode --resume                               # continue the most recent sessi
 arescode --yolo                                 # auto-approve every action (hard denials still apply)
 ```
 
-Scaffold this project's memory file (one time, optional — loaded into the system prompt each turn):
-
-```powershell
-arescode init                                   # write a starter ARES.md in the current directory
-```
-
 This opens the interactive REPL. Type a message and press **Enter** to send
 (end a line with **\\** before Enter — or press **Ctrl+J** — to insert a newline). In-REPL commands:
 
@@ -151,10 +145,11 @@ This opens the interactive REPL. Type a message and press **Enter** to send
 |---|---|
 | `/help` | list commands |
 | `/clear` | reset the conversation history |
+| `/init` | scan the repo and have the model write/update `ARES.md` (project memory) |
 | `/model [name]` | no arg: pick from installed models; with a name: switch (unloads the old model from VRAM first). The chosen model is remembered as the default next launch (D13) |
 | `/verbose` | toggle full tool output in the trace |
 | `/stats` | show edit telemetry for the session (grouped by model) |
-| `/map` | show the repository map injected into the system prompt |
+| `/map` | rescan the project and show the repository map (also refreshes what the model sees) |
 | `/compact` | summarize older history now to reclaim context budget |
 | `/allow [cmd]` | no arg: show the allowlist; with a token: always allow that bash command |
 | `/deny <cmd>` | remove a bash command from the session allowlist |

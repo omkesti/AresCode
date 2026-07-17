@@ -128,17 +128,18 @@ Input shortcuts:
 ## Project memory
 
 Drop an `ARES.md` file in your project root to give AresCode durable, project-specific context
-(conventions, key commands, gotchas). It is loaded into the system prompt on every turn. Generate a
-starter template with:
-
-```powershell
-arescode init
-```
+(conventions, key commands, gotchas). It is loaded into the system prompt on every turn. To have
+AresCode write it for you, run `/init` inside the session: the model explores the repo and authors
+`ARES.md` from what it actually reads — its write goes through the normal approval prompt — so the
+memory reflects the real project instead of a blank template. Re-run `/init` any time to refresh it.
 
 AresCode also builds a gitignore-filtered **repo map** at session start so the model knows the
-project's shape without spending tool calls; view it any time with `/map`. As a session grows past
-75% of the context budget, the oldest history is summarized into a compact note (or force it with
-`/compact`) so long, multi-step tasks stay coherent on a small local model.
+project's shape without spending tool calls. The map (and `ARES.md`) **stay current within a
+session**: whenever a tool changes the working tree, the map is rescanned for the next turn — so
+files the agent creates, renames, or deletes don't leave the model looking at a stale snapshot.
+`/map` shows the map and rescans it live on demand. As a session grows past 75% of the context
+budget, the oldest history is summarized into a compact note (or force it with `/compact`) so long,
+multi-step tasks stay coherent on a small local model.
 
 ## Safety Model
 

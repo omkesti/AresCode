@@ -1,8 +1,9 @@
 """Repo map: a gitignore-filtered file tree with sizes, capped ~1,500 tokens.
 
-Built once at session start and injected into the system prompt so the model has a bird's-eye
-view of the project without spending tool calls to discover its shape (context.md §4.5, TASKS 5.1).
-The `/map` command re-displays it.
+Injected into the system prompt so the model has a bird's-eye view of the project without spending
+tool calls to discover its shape (context.md §4.5, TASKS 5.1). Built at session start; the REPL
+rescans it (via ``_build_prompt``) whenever a tool changes the working tree and on ``/map``, so the
+injected map stays current within a session rather than only across launches.
 
 Two caps keep a large repo from blowing the token budget:
 

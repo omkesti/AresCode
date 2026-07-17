@@ -80,7 +80,7 @@
 ## Phase 5 — Endure (context management + memory) — milestone M5 ✓ complete
 
 - [x] 5.1 Implement `repo/repomap.py`: gitignore-filtered file tree with sizes, capped ~1,500 tokens (breadth-first truncation for huge repos), injected into system prompt at session start; `/map` command to view
-- [x] 5.2 Implement ARES.md support: load from project root into system prompt if present; `arescode init` generates a starter template (project conventions, key commands)
+- [x] 5.2 Implement ARES.md support: load from project root into system prompt if present; project memory is authored in-session by the model via `/init` (Phase 6 replaced the original static `arescode init` template with a model-driven authoring turn)
 - [x] 5.3 Implement token accounting in `core/context.py`: `len//4` estimate per message, running total, budget = num_ctx minus reply reserve (~1,500 tokens)
 - [x] 5.4 Implement compaction: at 75% budget, summarize oldest turns into one assistant message via a dedicated summarization call; never compact system prompt, current task statement, or last 4 tool results; `/compact` forces it manually; show a subtle indicator when it fires
 - [x] 5.5 Long-run hardening: budget + compaction keep a long turn within `num_ctx` (unit-verified against a 30-message history); per-model `num_ctx` (D12) already tunes the 14B down to 8192 for a <12GB GPU. The on-device 3050 soak run remains a user check against a live model.
@@ -98,8 +98,8 @@
 > and a subtle `notice`/`note` indicator fires. If the summarization call fails or returns empty it
 > falls back to a lossy `hard_truncate` so the session still fits. The **repo map** (`repo/repomap.py`)
 > is a gitignore-filtered tree with sizes, rendered at the deepest depth that fits ~1,500 tokens
-> (breadth-first depth truncation) with a per-directory width cap; `arescode init` writes a starter
-> `ARES.md`. The loop wiring — the `num_ctx` parameter plus the `maybe_compact` call at the top of the
+> (breadth-first depth truncation) with a per-directory width cap; the in-session `/init` command
+> has the model author `ARES.md`. The loop wiring — the `num_ctx` parameter plus the `maybe_compact` call at the top of the
 > step — was added to the `[HAND]` `core/loop.py` under the author's explicit authorization (the
 > summarizing logic itself is entirely in `core/context.py`, not the loop). The model-switch path
 > keeps `hard_truncate` on purpose: a shrinking-window swap happens with the old model already evicted,

@@ -49,8 +49,9 @@ def _default(
         False, "--yolo", help="Auto-approve every action (dangerous; hard denials still apply)."
     ),
 ) -> None:
-    """Launch the agent REPL in the current directory (the default when no subcommand is given)."""
-    # With a subcommand present (e.g. `arescode init`), the callback just yields to it.
+    """Launch the agent REPL in the current directory."""
+    # A subcommand (if any is ever added) handles itself; the bare invocation launches the REPL.
+    # Project memory is authored in-session with `/init`, not by a CLI subcommand.
     if ctx.invoked_subcommand is not None:
         return
 
@@ -68,24 +69,6 @@ def _default(
     from arescode.ui.repl import run
 
     asyncio.run(run(config=config, project_dir=project_dir, resume=resume, yolo=yolo))
-
-
-@app.command()
-def init(
-    force: bool = typer.Option(False, "--force", help="Overwrite an existing ARES.md."),
-) -> None:
-    """Generate a starter ARES.md (project memory) in the current directory (TASKS 5.2)."""
-    # Imported lazily so `--help` stays fast and doesn't pull in the repo-map / context stack.
-    from arescode.core.context import ARES_MEMORY_FILENAME, ares_template
-
-    project_dir = Path.cwd()
-    path = project_dir / ARES_MEMORY_FILENAME
-    if path.exists() and not force:
-        typer.echo(f"{ARES_MEMORY_FILENAME} already exists at {path} - use --force to overwrite.",
-                   err=True)
-        raise typer.Exit(code=1)
-    path.write_text(ares_template(project_dir), encoding="utf-8")
-    typer.echo(f"Wrote {path}. Edit it to capture this project's conventions and key commands.")
 
 
 def main() -> None:

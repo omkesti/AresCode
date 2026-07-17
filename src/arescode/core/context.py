@@ -130,35 +130,35 @@ def assemble_system_prompt(
     return "\n\n".join(parts)
 
 
-def ares_template(project_dir: Path | str) -> str:
-    """A starter ``ARES.md`` for ``arescode init``: conventions + key commands scaffolding."""
-    name = Path(project_dir).resolve().name or "this project"
-    return f"""\
-# ARES.md — project memory for {name}
+# The task message behind the in-session ``/init`` command (context.md §4.5). Rather than writing a
+# static placeholder, ``/init`` runs an ordinary agent turn on this instruction so the *model*
+# explores the repo and authors ``ARES.md`` from what it actually read — the local-model analogue of
+# Claude Code's ``/init``. Deliberately explicit and staged, because a weak model needs the sections
+# spelled out and a firm "verify in a file, don't guess" rule.
+INIT_INSTRUCTION = f"""\
+Create or update this project's {ARES_MEMORY_FILENAME} — a short project-memory file that AresCode \
+loads into its system prompt every session, so future turns start already knowing the project.
 
-AresCode loads this file into its system prompt on every turn. Keep it short and high-signal:
-the conventions and commands the agent would otherwise have to rediscover. Delete what does not
-apply.
+Work in two stages:
 
-## Overview
+1. EXPLORE. Learn the project from its actual files — do not guess from names. Read the README if \
+present, the package/build file (e.g. pyproject.toml, package.json, go.mod, Cargo.toml), the main \
+entry point, and a few core source files. Use glob/grep to find how the project is run, tested, \
+and linted.
 
-<One or two sentences: what this project is and its entry point.>
+2. WRITE. Then write {ARES_MEMORY_FILENAME} at the project root with write_file (or edit_file if \
+it already exists). Use these sections; fill each from what you actually read, and omit any that \
+truly do not apply:
+   - Overview: one paragraph on what the project is and its entry point.
+   - Where things are: the key directories/files and what each is for.
+   - Key commands: install, run, test, lint/format — the real commands, exactly.
+   - Conventions: language/framework/style rules; where new code and tests go.
+   - Notes: gotchas, required env vars, services that must be running.
 
-## Key commands
-
-- Install:
-- Run:
-- Test:
-- Lint/format:
-
-## Conventions
-
-- <Language / framework / style rules the agent should follow.>
-- <Where new code and tests go.>
-
-## Notes
-
-- <Anything surprising: gotchas, required env vars, services that must be running.>
+Keep it concise and high-signal — aim for well under ~60 lines, since it is re-read on every turn \
+and every token is paid repeatedly. Invent nothing you did not verify in a file, and never write \
+the file with bash (echo >, cat >, tee, sed -i). When {ARES_MEMORY_FILENAME} is written, end your \
+turn with a one-line plain-text summary of what you captured.
 """
 
 

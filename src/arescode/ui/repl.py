@@ -9,6 +9,7 @@ row (or Ctrl+D) exits (context.md §3, TASKS 1.3 / 1.6 / 2.8).
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 from contextlib import suppress
@@ -22,7 +23,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from arescode.config import BUILTIN_DEFAULT_MODEL, Config, read_last_model, save_last_model
-from arescode.core.context import assemble_system_prompt, compact_now
+from arescode.core.context import INIT_INSTRUCTION, assemble_system_prompt, compact_now
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
 from arescode.core.state import SessionState
@@ -47,11 +48,12 @@ HELP_TEXT = """\
 Commands:
   /help            show this help
   /clear           reset the conversation history
+  /init            scan the repo and write/update ARES.md (project memory), model-authored
   /model [name]    no arg: pick from installed models; with a name: switch (unloads the old one).
                    The chosen model is remembered as the default for the next launch.
   /verbose         toggle full tool output in the trace
   /stats           show edit telemetry for this session (grouped by model)
-  /map             show the repository map injected into the system prompt
+  /map             rescan the project and show the repo map (also refreshes what the model sees)
   /compact         summarize older history now to reclaim context budget
   /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
   /deny <cmd>      remove a bash command from the session allowlist
@@ -73,6 +75,7 @@ class Command:
     action: Literal["continue", "exit"]
     model_pick: bool = False  # /model with no arg -> open the interactive picker
     model_target: str | None = None  # /model <name> -> switch target (resolved by the REPL)
+    init: bool = False  # set when /init is issued -> model-driven ARES.md authoring turn
     toggle_verbose: bool = False  # set when /verbose is issued
     show_stats: bool = False  # set when /stats is issued
     show_map: bool = False  # set when /map is issued
@@ -97,6 +100,8 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
         state.clear()
         render.note(console, "history cleared")
         return Command(action="continue")
+    if name == "/init":
+        return Command(action="continue", init=True)
     if name == "/verbose":
         return Command(action="continue", toggle_verbose=True)
     if name == "/stats":
@@ -239,6 +244,29 @@ async def _await_turn(task: asyncio.Future) -> str:
         watcher.cancel()
         with suppress(asyncio.CancelledError, KeyboardInterrupt):
             await watcher
+
+
+def _build_prompt(project_dir: Path) -> tuple[str, str]:
+    """Freshly scan the project: returns ``(repo_map, assembled system prompt)``.
+
+    Called at session start and again whenever the working tree may have changed, so the repo map
+    and ``ARES.md`` the model sees stay current *within* a session — not only across launches.
+    """
+    repo_map = build_repo_map(project_dir)
+    return repo_map, assemble_system_prompt(project_dir, repo_map=repo_map)
+
+
+_MAP_SIZE_SUFFIX = re.compile(r"  \d+(?:\.\d+)?[BKM]$")
+
+
+def _map_structure(repo_map: str) -> list[str]:
+    """The map's shape (file/dir names) with per-file sizes stripped.
+
+    Editing a file changes its rendered size but not the project's structure; comparing structure
+    lets the REPL announce a genuine add/rename/delete without crying "changed" on every in-place
+    edit.
+    """
+    return [_MAP_SIZE_SUFFIX.sub("", line) for line in repo_map.splitlines()]
 
 
 def _history_path() -> Path:
@@ -394,10 +422,9 @@ async def run(
     # a hard-deny backstop so a blocklisted command or path escape can never slip through.
     executor = Executor(project_dir, config, gate=gate)
     observer = render.ConsoleObserver(console, verbose=False)
-    # Built once at session start and injected into the system prompt (context.md §4.5, TASKS 5.1);
-    # kept around so /map can redisplay it without a rescan.
-    repo_map = build_repo_map(project_dir)
-    system_prompt = assemble_system_prompt(project_dir, repo_map=repo_map)
+    # Assembled at session start and injected into the system prompt (context.md §4.5, TASKS 5.1);
+    # rebuilt within the session whenever a tool touches the tree, and rescanned live by /map.
+    repo_map, system_prompt = _build_prompt(project_dir)
     state = _load_session(project_dir, config, console, resume=resume)
 
     # Native admin client + switch lifecycle owner (D12). Isolated from the chat provider: the
@@ -427,68 +454,21 @@ async def run(
     # Ctrl+C within DOUBLE_INTERRUPT_WINDOW exits, so "double Ctrl+C" works from either context.
     last_interrupt = 0.0
 
-    while True:
-        try:
-            user_input = await prompt_session.prompt_async(PROMPT_MESSAGE)
-        except EOFError:  # Ctrl+D still exits
-            break
-        except KeyboardInterrupt:  # Ctrl+C at the prompt: press again quickly to exit
-            now = time.monotonic()
-            if now - last_interrupt < DOUBLE_INTERRUPT_WINDOW:
-                break
-            last_interrupt = now
-            render.note(console, "press Ctrl+C again to exit")
-            continue
+    async def _agent_turn(message: str, *, turn_state: SessionState | None = None) -> bool:
+        """Run one agent turn for ``message``; returns True if the session should exit.
 
-        user_input = user_input.strip()
-        if not user_input:
-            continue
-
-        if user_input.startswith("/"):
-            command = parse_command(user_input, state, console)
-            if command.action == "exit":
-                break
-            if command.model_pick or command.model_target is not None:
-                config, provider = await _switch_model(
-                    manager=manager, state=state, config=config, provider=provider,
-                    console=console, target=command.model_target,
-                )
-            if command.toggle_verbose:
-                observer.verbose = not observer.verbose
-                render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
-            if command.show_stats:
-                render.note(console, executor.stats_report())
-            if command.show_map:
-                render.note(console, repo_map or "(repository map is empty)")
-            if command.compact:
-                result = await compact_now(state, provider=provider, num_ctx=config.num_ctx)
-                if result.compacted:
-                    render.note(
-                        console,
-                        f"compacted history: folded {result.folded} message(s) "
-                        f"(~{result.before_tokens}->{result.after_tokens} tokens)",
-                    )
-                    state.save(project_dir)
-                else:
-                    render.note(console, f"nothing to compact ({result.reason})")
-            if command.show_allow:
-                render.note(console, gate.describe_allowlist())
-            if command.allow:
-                gate.allow_command(command.allow)
-                render.note(console, f"always allowing bash command: {command.allow}")
-            if command.deny:
-                removed = gate.deny_command(command.deny)
-                render.note(
-                    console,
-                    f"removed {command.deny} from the allowlist" if removed
-                    else f"{command.deny} was not in the session allowlist",
-                )
-            continue
-
+        ``turn_state`` defaults to the live session. Pass a throwaway state (e.g. for ``/init``) to
+        run a self-contained task without threading its instruction into the real conversation.
+        Shared by the normal message path and ``/init`` so both get Esc/Ctrl+C handling and the
+        post-turn repo-map refresh in one place.
+        """
+        nonlocal system_prompt, repo_map, last_interrupt
+        active_state = turn_state if turn_state is not None else state
+        fs_gen_before = executor.fs_generation  # to detect tree changes made during this turn
         task = asyncio.ensure_future(
             run_turn(
-                user_input,
-                state=state,
+                message,
+                state=active_state,
                 provider=provider,
                 executor=executor,
                 system_prompt=system_prompt,
@@ -522,8 +502,90 @@ async def run(
             manager.busy = False
 
         if should_exit:
+            return True
+
+        # A tool changed (or may have changed) the tree this turn: rescan so the next turn's system
+        # prompt reflects new/renamed/deleted files and any ARES.md edits, instead of the stale
+        # session-start snapshot. Announce only a real structural change, not size churn from edits.
+        if executor.fs_generation != fs_gen_before:
+            new_map, new_prompt = _build_prompt(project_dir)
+            if _map_structure(new_map) != _map_structure(repo_map):
+                render.note(console, "project files changed — repo map refreshed")
+            repo_map, system_prompt = new_map, new_prompt
+
+        if active_state is state:  # never persist a throwaway /init state into the session file
+            state.save(project_dir)
+        return False
+
+    while True:
+        try:
+            user_input = await prompt_session.prompt_async(PROMPT_MESSAGE)
+        except EOFError:  # Ctrl+D still exits
             break
-        state.save(project_dir)
+        except KeyboardInterrupt:  # Ctrl+C at the prompt: press again quickly to exit
+            now = time.monotonic()
+            if now - last_interrupt < DOUBLE_INTERRUPT_WINDOW:
+                break
+            last_interrupt = now
+            render.note(console, "press Ctrl+C again to exit")
+            continue
+
+        user_input = user_input.strip()
+        if not user_input:
+            continue
+
+        if user_input.startswith("/"):
+            command = parse_command(user_input, state, console)
+            if command.action == "exit":
+                break
+            if command.model_pick or command.model_target is not None:
+                config, provider = await _switch_model(
+                    manager=manager, state=state, config=config, provider=provider,
+                    console=console, target=command.model_target,
+                )
+            if command.init:
+                # Model-driven /init: run the authoring task on a throwaway state so the big
+                # instruction never lands in the real conversation. The post-turn refresh picks up
+                # the freshly written ARES.md for the rest of the session.
+                render.note(console, "scanning the project to write ARES.md…")
+                if await _agent_turn(INIT_INSTRUCTION, turn_state=SessionState.new(state.model)):
+                    break
+            if command.toggle_verbose:
+                observer.verbose = not observer.verbose
+                render.note(console, f"verbose {'on' if observer.verbose else 'off'}")
+            if command.show_stats:
+                render.note(console, executor.stats_report())
+            if command.show_map:
+                # Rescan live so /map doubles as a manual refresh of what the model sees.
+                repo_map, system_prompt = _build_prompt(project_dir)
+                render.note(console, repo_map or "(repository map is empty)")
+            if command.compact:
+                result = await compact_now(state, provider=provider, num_ctx=config.num_ctx)
+                if result.compacted:
+                    render.note(
+                        console,
+                        f"compacted history: folded {result.folded} message(s) "
+                        f"(~{result.before_tokens}->{result.after_tokens} tokens)",
+                    )
+                    state.save(project_dir)
+                else:
+                    render.note(console, f"nothing to compact ({result.reason})")
+            if command.show_allow:
+                render.note(console, gate.describe_allowlist())
+            if command.allow:
+                gate.allow_command(command.allow)
+                render.note(console, f"always allowing bash command: {command.allow}")
+            if command.deny:
+                removed = gate.deny_command(command.deny)
+                render.note(
+                    console,
+                    f"removed {command.deny} from the allowlist" if removed
+                    else f"{command.deny} was not in the session allowlist",
+                )
+            continue
+
+        if await _agent_turn(user_input):
+            break
 
     if executor.stats.attempts:
         render.note(console, executor.stats_report())

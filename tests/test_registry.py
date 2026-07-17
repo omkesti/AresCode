@@ -107,3 +107,39 @@ def test_edit_telemetry_is_tagged_per_active_model(tmp_path):
 def test_active_model_defaults_to_config_model(tmp_path):
     ex = Executor(tmp_path, Config(model="from-config"))
     assert ex.active_model == "from-config"
+
+
+# --- fs_generation: the "tree may have changed" signal the REPL watches --------------------
+
+
+def test_fs_generation_bumps_on_write_and_edit(tmp_path):
+    ex = Executor(tmp_path, Config())
+    assert ex.fs_generation == 0
+    assert ex.run(WriteFileAction("x.py", "value = 1\n")).ok
+    assert ex.fs_generation == 1  # new file -> tree changed
+    assert ex.run(EditFileAction("x.py", (SearchReplace("value = 1", "value = 2"),))).ok
+    assert ex.fs_generation == 2  # successful edit -> tree changed
+
+
+def test_fs_generation_bumps_on_bash(tmp_path):
+    ex = Executor(tmp_path, Config())
+    ex.run(BashAction("python -c \"pass\""))
+    assert ex.fs_generation == 1  # bash may have touched the tree; flagged conservatively
+
+
+def test_fs_generation_steady_on_read_only_tools(tmp_path):
+    (tmp_path / "a.txt").write_text("hi\n")
+    ex = Executor(tmp_path, Config())
+    ex.run(ReadFileAction("a.txt"))
+    ex.run(GrepAction("hi"))
+    assert ex.fs_generation == 0  # reads/searches never change the tree
+
+
+def test_fs_generation_steady_on_failed_write_and_edit(tmp_path):
+    (tmp_path / "exists.py").write_text("keep\n")
+    ex = Executor(tmp_path, Config())
+    # write_file refuses to overwrite an existing file -> no change.
+    assert not ex.run(WriteFileAction("exists.py", "new")).ok
+    # edit_file against a missing file -> no change.
+    assert not ex.run(EditFileAction("missing.py", (SearchReplace("a", "b"),))).ok
+    assert ex.fs_generation == 0
