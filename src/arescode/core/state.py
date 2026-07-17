@@ -20,6 +20,17 @@ def sessions_dir(project_dir: Path) -> Path:
     return project_dir / SESSIONS_SUBDIR
 
 
+@dataclass(slots=True)
+class SessionInfo:
+    """A saved session's metadata, read without loading its full history (for ``/sessions``)."""
+
+    session_id: str
+    model: str
+    created_at: str
+    message_count: int
+    path: Path
+
+
 def _new_session_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -117,3 +128,55 @@ class SessionState:
         if not files:
             return None
         return cls.load(files[-1])
+
+    @classmethod
+    def list_sessions(cls, project_dir: Path) -> list[SessionInfo]:
+        """Metadata for every saved session, newest first — cheap enough for ``/sessions``.
+
+        Session ids are ``%Y%m%d-%H%M%S`` timestamps, so a reverse id sort is chronological.
+        Unreadable or malformed session files are skipped rather than crashing the listing.
+        """
+        directory = sessions_dir(project_dir)
+        if not directory.is_dir():
+            return []
+        infos: list[SessionInfo] = []
+        for path in directory.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, ValueError):
+                continue  # a truncated/half-written session must not break the whole listing
+            infos.append(
+                SessionInfo(
+                    session_id=str(data.get("session_id") or path.stem),
+                    model=str(data.get("model", "")),
+                    created_at=str(data.get("created_at", "")),
+                    message_count=len(data.get("messages") or []),
+                    path=path,
+                )
+            )
+        infos.sort(key=lambda i: i.session_id, reverse=True)
+        return infos
+
+    @classmethod
+    def resolve(cls, project_dir: Path, ref: str) -> tuple[SessionState | None, str | None]:
+        """Load a session by exact id or a unique id-prefix (for ``/resume <id>``).
+
+        Returns ``(state, None)`` on success or ``(None, error_message)`` — an empty ref, no
+        match, or an ambiguous prefix each yield a user-facing message the REPL can print.
+        """
+        ref = ref.strip()
+        if not ref:
+            return None, "usage: /resume <session-id>"
+        infos = cls.list_sessions(project_dir)
+        if not infos:
+            return None, "no saved sessions to resume"
+        exact = [i for i in infos if i.session_id == ref]
+        matches = exact or [i for i in infos if i.session_id.startswith(ref)]
+        if not matches:
+            return None, f"no session matches '{ref}' (try /sessions to list them)"
+        if len(matches) > 1:
+            shown = ", ".join(i.session_id for i in matches[:5])
+            more = "…" if len(matches) > 5 else ""
+            reason = f"'{ref}' matches {len(matches)} sessions: {shown}{more} — be more specific"
+            return None, reason
+        return cls.load(matches[0].path), None

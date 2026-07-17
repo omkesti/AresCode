@@ -33,7 +33,7 @@ from arescode.core.context import (
 )
 from arescode.core.loop import run_turn
 from arescode.core.models import ModelManager, match_model
-from arescode.core.state import SessionState
+from arescode.core.state import SessionInfo, SessionState
 from arescode.permissions.gate import Decision, Gate
 from arescode.providers.base import ProviderError
 from arescode.providers.ollama_admin import AdminUnavailable, ModelLoadError, OllamaAdmin
@@ -65,6 +65,8 @@ Commands:
   /compact         summarize older history now to reclaim context budget
   /allow [cmd]     no arg: show the allowlist; with a token: always allow that bash command
   /deny <cmd>      remove a bash command from the session allowlist
+  /sessions        list saved sessions for this project (id, messages, model)
+  /resume <id>     load a saved session by id (or a unique id prefix) into this one
   /exit, /quit     leave AresCode
 Input:
   Enter            send the message
@@ -91,6 +93,8 @@ class Command:
     show_allow: bool = False  # set when /allow is issued with no argument
     allow: str | None = None  # bash token to add to the session allowlist (/allow <cmd>)
     deny: str | None = None  # bash token to drop from the session allowlist (/deny <cmd>)
+    show_sessions: bool = False  # set when /sessions is issued -> list saved sessions
+    resume_id: str | None = None  # session id (or prefix) to load (/resume <id>)
 
 
 def parse_command(line: str, state: SessionState, console: Console) -> Command:
@@ -127,6 +131,15 @@ def parse_command(line: str, state: SessionState, console: Console) -> Command:
             render.note(console, "usage: /deny <command>")
             return Command(action="continue")
         return Command(action="continue", deny=arg.split()[0])
+    if name == "/sessions":
+        return Command(action="continue", show_sessions=True)
+    if name == "/resume":
+        # The load (and any needed model note) happens in the REPL where `state` is in scope;
+        # parse_command only carries the requested id. No arg -> show usage.
+        if not arg:
+            render.note(console, "usage: /resume <session-id>  (see /sessions)")
+            return Command(action="continue")
+        return Command(action="continue", resume_id=arg.split()[0])
     if name == "/model":
         # The actual switch (validate -> unload -> warmup -> budget) is async and runs in the
         # REPL; parse_command only signals intent. No arg opens the picker; a name is a target.
@@ -291,6 +304,28 @@ def _clean_ares_content(text: str) -> str:
     text = text.strip()
     fenced = _OUTER_FENCE.match(text)
     return fenced.group(1).strip() if fenced else text
+
+
+def _format_sessions(infos: list[SessionInfo], current_id: str) -> str:
+    """Render the saved-session list for ``/sessions``; the active session is marked.
+
+    Pure string builder (no console) so it is unit-testable. Columns: id, message count, model,
+    and creation time; the current session gets a ``*`` marker and a ``(current)`` suffix.
+    """
+    if not infos:
+        return "no saved sessions for this project yet"
+    lines = [f"Saved sessions ({len(infos)}):"]
+    id_width = max(len(i.session_id) for i in infos)
+    for info in infos:
+        marker = "*" if info.session_id == current_id else " "
+        created = info.created_at or "?"
+        suffix = "  (current)" if info.session_id == current_id else ""
+        lines.append(
+            f"  {marker} {info.session_id:<{id_width}}  "
+            f"{info.message_count:>3} msg  {info.model or '?'}  {created}{suffix}"
+        )
+    lines.append("resume one with /resume <id> (a unique id prefix works too)")
+    return "\n".join(lines)
 
 
 def _history_path() -> Path:
@@ -657,6 +692,29 @@ async def run(
                     f"removed {command.deny} from the allowlist" if removed
                     else f"{command.deny} was not in the session allowlist",
                 )
+            if command.show_sessions:
+                render.note(
+                    console,
+                    _format_sessions(SessionState.list_sessions(project_dir), state.session_id),
+                )
+            if command.resume_id is not None:
+                loaded, err = SessionState.resolve(project_dir, command.resume_id)
+                if err is not None:
+                    render.error(console, err)
+                elif loaded.session_id == state.session_id:
+                    render.note(console, "already in that session")
+                else:
+                    # Resuming loads the *conversation*; the active model/provider stays as-is
+                    # (no VRAM hot-swap, no D13 remember side-effect). Keep serving with the current
+                    # model so the resumed session's model field reflects what is answering it.
+                    recorded = loaded.model
+                    loaded.model = state.model
+                    state = loaded
+                    executor.active_model = state.model
+                    msg = f"resumed session {state.session_id} ({len(state.messages)} messages)"
+                    if recorded and recorded != state.model:
+                        msg += f"; it was recorded under {recorded} — /model to switch"
+                    render.note(console, msg)
             continue
 
         if await _agent_turn(user_input):

@@ -12,12 +12,20 @@ from pathlib import Path
 
 import typer
 
+from arescode import __version__
 from arescode.config import load_config, migrate_legacy_paths
 
 app = typer.Typer(
     add_completion=False,
     help="AresCode - a local-model coding agent (Ollama-powered).",
 )
+
+
+def _version_callback(value: bool) -> None:
+    """Print the version and exit (eager, so ``--version`` short-circuits everything else)."""
+    if value:
+        typer.echo(f"arescode {__version__}")
+        raise typer.Exit()
 
 
 def _validate_project_dir(path: Path) -> None:
@@ -47,6 +55,10 @@ def _default(
     resume: bool = typer.Option(False, "--resume", help="Resume the most recent session."),
     yolo: bool = typer.Option(
         False, "--yolo", help="Auto-approve every action (dangerous; hard denials still apply)."
+    ),
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the AresCode version and exit.",
     ),
 ) -> None:
     """Launch the agent REPL in the current directory."""

@@ -12,12 +12,13 @@ from prompt_toolkit.keys import Keys
 from rich.console import Console
 
 import arescode.ui.repl as repl_mod
-from arescode.core.state import SessionState
+from arescode.core.state import SessionInfo, SessionState
 from arescode.ui.repl import (
     _await_turn,
     _build_key_bindings,
     _build_prompt,
     _clean_ares_content,
+    _format_sessions,
     _map_structure,
     parse_command,
 )
@@ -175,6 +176,52 @@ def test_deny_without_arg_is_noop():
     command = parse_command("/deny", SessionState.new("m"), _console())
     assert command.action == "continue"
     assert command.deny is None
+
+
+def test_sessions_command_requests_listing():
+    command = parse_command("/sessions", SessionState.new("m"), _console())
+    assert command.show_sessions is True
+    assert command.action == "continue"
+
+
+def test_resume_with_id_sets_target():
+    command = parse_command("/resume 20260101-000000", SessionState.new("m"), _console())
+    assert command.resume_id == "20260101-000000"
+    assert command.action == "continue"
+
+
+def test_resume_without_arg_is_noop():
+    command = parse_command("/resume", SessionState.new("m"), _console())
+    assert command.action == "continue"
+    assert command.resume_id is None
+
+
+def _info(session_id: str, model: str, count: int) -> SessionInfo:
+    from pathlib import Path
+
+    return SessionInfo(
+        session_id=session_id,
+        model=model,
+        created_at="2026-01-01T00:00:00",
+        message_count=count,
+        path=Path(f"{session_id}.json"),
+    )
+
+
+def test_format_sessions_marks_current_and_lists_all():
+    infos = [_info("20260102-000000", "m-new", 4), _info("20260101-000000", "m-old", 2)]
+    text = _format_sessions(infos, current_id="20260101-000000")
+    assert "Saved sessions (2):" in text
+    assert "m-new" in text and "m-old" in text
+    # The active session is marked; the other is not.
+    current_line = next(ln for ln in text.splitlines() if "20260101-000000" in ln)
+    other_line = next(ln for ln in text.splitlines() if "20260102-000000" in ln)
+    assert "*" in current_line and "(current)" in current_line
+    assert "(current)" not in other_line
+
+
+def test_format_sessions_handles_empty():
+    assert "no saved sessions" in _format_sessions([], current_id="x")
 
 
 async def _never_escape() -> None:

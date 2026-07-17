@@ -109,12 +109,12 @@
 
 ## Phase 6 — Polish & ship (packaging + DX) — milestone M6
 
-- [ ] 6.1 Complete slash commands: `/stats`, `/compact`, `/map`, `/allow`, `/deny`, `/verbose`, `/resume <id>`, `/sessions`
+- [x] 6.1 Complete slash commands: `/stats`, `/compact`, `/map`, `/allow`, `/deny`, `/verbose`, `/resume <id>`, `/sessions` — the last two round out the set (`SessionState.list_sessions`/`resolve` + REPL wiring; `/resume` loads a session by id or unique id-prefix and keeps the active model)
 - [ ] 6.2 First-run experience: detect missing Ollama/model and print exact fix commands; graceful message when ripgrep absent
 - [ ] 6.3 Error-path sweep: model server down mid-turn, malformed config, unreadable files, git-less directories — all produce clear messages, never tracebacks
-- [ ] 6.4 Packaging: installable via `pipx install .`, console script `arescode`; version command; README with 5-minute quickstart (per docs principle: <5 min to first success)
+- [ ] 6.4 Packaging: installable via `pipx install .`, console script `arescode`; **version command done** (`--version` flag, eager, prints `arescode <version>`); README with 5-minute quickstart still to verify (per docs principle: <5 min to first success)
 - [ ] 6.5 Dogfood gauntlet: use AresCode itself (not Claude Code) for 3 real tasks on one of your other projects (e.g., a JARVIS or Suture fix); log every failure into `LATER.md` or the parser corpus
-- [ ] 6.6 Write `LATER.md`: deferred features backlog (sub-agents, MCP, TODO planner, tree-sitter symbols, steering queue, multi-model routing) so scope creep has a home that isn't the codebase
+- [x] 6.6 Write `LATER.md`: deferred features backlog (sub-agents, MCP, TODO planner, tree-sitter symbols, steering queue, multi-model routing) so scope creep has a home that isn't the codebase
 
 **Exit criteria — MVP Definition of Done (from context.md §7):** in a real repo, `arescode` takes "fix the failing test in X", finds the file, edits it, reruns tests, and reports success — every write/command approved through the gate — using only the local model.
 
