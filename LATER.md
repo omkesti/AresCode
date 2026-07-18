@@ -148,7 +148,7 @@ an alternate base prompt) and `--repeat N` (a pass RATE, not a noisy 1/1).
 | 3 rename-param | 3/3 exact | 2/2 exact |
 | **Overall** | **6/9** | **6/6** |
 
-**Finding C — 7b drops tag-less/marker-less whole-file edits on tiny files (harness gap, OPEN).**
+**Finding C — 7b drops tag-less/marker-less whole-file edits on tiny files (harness gap) — FIXED (2026-07-18).**
 On the 2-line `ops.py` the 7b writes the fix as a bare markdown block with a bold filename and *no*
 tool tag and *no* SEARCH/REPLACE markers:
 
@@ -161,11 +161,13 @@ tool tag and *no* SEARCH/REPLACE markers:
 This matches none of the parser's three recognized edit forms (conflict-marker; bare-keyword =
 Finding A; this), so the edit is silently dropped (`/stats: 0 attempted`), pytest keeps failing, and
 the stall guard ends the turn — 0/3. The 14b avoids it (uses real SEARCH/REPLACE even on tiny files).
-Per "fix the harness, not the prompt", the likely fix is a **guarded parser recognizer** (filename
-header + a fenced block whose content matches an existing file → whole-file edit), tested like
-`_bare_edit_block`; a prompt-only fix bets on 80%+ instruction-following exactly where the 7b is
-weakest. Decision (prompt vs parser vs both) pending before the prompt rewrite. `parser.py` is
-`[HAND]` (D10) — needs explicit authorization.
+Per "fix the harness, not the prompt", the fix landed in the **parser** (`parser.py`, `[HAND]` under
+the relaxed-D10 memory, minimal + tested): (1) a guarded tag-less recovery (`_recover_whole_file_edit`,
+only when nothing else parsed) and (2) a tagged-`edit_file` whole-file fence fallback — plus a third
+fix found while measuring: `_write_content` now skips a stray `**filename**` block so it isn't
+mistaken for the file body (the actual blocker — it compiled to a syntax error and the edit was
+rejected). Result: 7b task 1 went **0/3 → passing every run**; overall 7b **6/9 → 6/6**. Full write-up
+in [`implementation/`](implementation/). Corpus + tests in `tests/test_parser_dogfood.py`.
 
 **Finding D — 14b SEARCH blocks miss often, lean on the fallback (edit-quality, watch).** The 14b
 passed every task, but its first-try SEARCH blocks frequently no-matched (task 2 run 1: `6 attempted,

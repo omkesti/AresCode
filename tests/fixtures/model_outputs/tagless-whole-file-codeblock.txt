@@ -1,0 +1,12 @@
+The `add` function in `ops.py` is currently implemented to subtract the second
+argument from the first. This is why `add(2, 3)` returns `-1`.
+
+To fix this, let's edit `ops.py` to perform addition instead of subtraction.
+
+**ops.py**
+```python
+def add(a, b):
+    return a + b
+```
+
+Now that we have made the change, let's run the tests again to confirm they pass.

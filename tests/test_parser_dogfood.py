@@ -70,3 +70,69 @@ def test_conflict_marker_edit_still_parses():
     assert edits[0].path == "src/app.py"
     assert edits[0].edits[0].search == "old_line = 1"
     assert edits[0].edits[0].replace == "new_line = 2"
+
+
+# --- Finding C: tag-less / marker-less whole-file code block (7b baseline 2026-07-18) -------------
+
+_TAGLESS = (
+    Path(__file__).parent / "fixtures" / "model_outputs" / "tagless-whole-file-codeblock.txt"
+).read_text(encoding="utf-8")
+
+
+def test_tagless_filename_codeblock_recovered_as_whole_file_edit():
+    # The measured 7b failure: no <tool> tag, no SEARCH/REPLACE markers — just `**ops.py**` then the
+    # full new file in a fence. Recovered as an empty-SEARCH whole-file edit.
+    edits = [a for a in parse(_TAGLESS).actions if isinstance(a, EditFileAction)]
+    assert len(edits) == 1
+    assert edits[0].path == "ops.py"
+    assert edits[0].edits[0].search == ""  # empty SEARCH => whole-file rewrite
+    assert edits[0].edits[0].replace == "def add(a, b):\n    return a + b"
+
+
+def test_recovery_skipped_when_another_action_present():
+    # The guard: recovery fires ONLY when nothing else parsed. A turn that also issues a real tool
+    # call must not have an incidental filename+fence turned into a second (whole-file) edit.
+    sample = (
+        "Let me check first.\n<tool>read_file</tool><path>ops.py</path>\n\n"
+        "**ops.py**\n```python\ndef add(a, b):\n    return a + b\n```\n"
+    )
+    actions = parse(sample).actions
+    assert not [a for a in actions if isinstance(a, EditFileAction)]
+    assert any(getattr(a, "tool", "") == "read_file" for a in actions)
+
+
+def test_edit_file_tag_with_fence_no_markers_is_whole_file():
+    # Tagged variant of Finding C: the tag is present but the model pastes the full file in a fence
+    # with no SEARCH/REPLACE markers -> whole-file edit scoped to the tag window.
+    sample = (
+        "<tool>edit_file</tool><path>ops.py</path>\n"
+        "```python\ndef add(a, b):\n    return a + b\n```\n"
+    )
+    edits = [a for a in parse(sample).actions if isinstance(a, EditFileAction)]
+    assert len(edits) == 1
+    assert edits[0].path == "ops.py"
+    assert edits[0].edits[0].search == ""
+    assert edits[0].edits[0].replace == "def add(a, b):\n    return a + b"
+
+
+def test_incidental_codeblock_without_filename_header_is_not_an_edit():
+    # A fenced code block with no filename header just above it is not an edit (no false positive).
+    prose = (
+        "Here's roughly what the function should look like:\n\n"
+        "```python\ndef add(a, b):\n    return a + b\n```\n\nDoes that make sense?"
+    )
+    assert [a for a in parse(prose).actions if isinstance(a, EditFileAction)] == []
+
+
+def test_edit_tag_stray_fence_and_filename_header_extracts_code_not_header():
+    # 7b, task 1 (Run A): <tool>edit_file</tool> + a stray empty fence + a **filename** header +
+    # the real code fence. _fenced_blocks used to capture "**ops.py**" as the body (→ compiles to a
+    # syntax error, edit rejected). The filename-only block must be skipped so the code is used.
+    sample = (
+        "<tool>edit_file</tool><path>ops.py</path>\n"
+        "```\n\n**ops.py**\n```python\ndef add(a, b):\n    return a + b\n```\n"
+    )
+    edits = [a for a in parse(sample).actions if isinstance(a, EditFileAction)]
+    assert len(edits) == 1
+    assert edits[0].edits[0].search == ""
+    assert edits[0].edits[0].replace == "def add(a, b):\n    return a + b"

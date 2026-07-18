@@ -50,6 +50,16 @@ _BARE_SR_RE = re.compile(
 _PATHY = re.compile(r"^[\w./\\-]+$")
 _PATH_TAG = re.compile(r"<path>\s*(.*?)\s*</path>", re.IGNORECASE)
 
+# A filename on its own line (optionally **bold**, optional trailing colon) naming a file with an
+# extension — `**ops.py**`, `src/app.py:` — immediately above a fenced code block. Used ONLY by
+# _recover_whole_file_edit as a last resort. The required extension keeps it off ordinary prose.
+_FILE_HEADER_RE = re.compile(
+    r"^[ \t]*\*{0,2}[ \t]*([\w./\\-]+\.[A-Za-z0-9_]+)[ \t]*\*{0,2}[ \t]*:?[ \t]*$\n"
+    r"(?:[ \t]*\n)*"       # optional blank lines between the header and the fence
+    r"[ \t]*```",          # the opening fence must be the next non-blank line
+    re.MULTILINE,
+)
+
 
 @dataclass(slots=True)
 class ParseResult:
@@ -79,6 +89,14 @@ def parse(text: str) -> ParseResult:
         action = _parse_tool(text, m)
         if action is not None:
             found.append((m.start(), action))
+
+    # Last resort: if the whole completion parsed to NOTHING, try to recover a bare
+    # filename-header + fenced block as a whole-file edit (Finding C). Gated on "no other action" so
+    # it can never override a real tool call or misread a code block in a turn that already acted.
+    if not found:
+        recovered = _recover_whole_file_edit(text)
+        if recovered is not None:
+            found.append(recovered)
 
     found.sort(key=lambda item: item[0])
     return ParseResult(actions=[a for _, a in found], prose=_strip_actions(text))
@@ -119,12 +137,21 @@ def _parse_tool(text: str, match: re.Match[str]) -> Action | None:
         content = _write_content(window)
         return WriteFileAction(path, content or "") if path else None
     if name == "edit_file":
-        # A proper <<<<<<< SEARCH block is handled by SR_RE in parse(); this branch only rescues
-        # the bare-marker variant (no conflict markers), scoped to this tool's window so it can't
-        # misread prose. See _BARE_SR_RE / _bare_edit_block and the 6.5 dogfood note in LATER.md.
+        # A proper <<<<<<< SEARCH block is handled by SR_RE in parse(); this branch rescues the
+        # tag-scoped variants a weak model emits instead: (1) bare SEARCH/REPLACE labels with no
+        # conflict markers (_bare_edit_block, Finding A), or failing that (2) a lone fenced block
+        # meaning "replace the whole file" — the marker-less variant of Finding C, where the model
+        # keeps the tag but pastes the full new file in a fence. Both are scoped to this tool's
+        # window so prose is never misread. (2) becomes an empty-SEARCH whole-file edit, which
+        # apply_edit validates (file must exist, no elision, syntax must hold) before writing.
         path = _param(window, "path")
+        if not path:
+            return None
         edit = _bare_edit_block(window)
-        return EditFileAction(path, (edit,)) if (path and edit is not None) else None
+        if edit is None:
+            whole = _write_content(window)  # first non-empty fence = the full new file
+            edit = SearchReplace("", whole) if whole else None
+        return EditFileAction(path, (edit,)) if edit is not None else None
     return None  # unknown tool name
 
 
@@ -186,10 +213,26 @@ def _fenced_blocks(window: str) -> list[str]:
     return blocks
 
 
+# A fenced block that is really just a filename header, e.g. ``**ops.py**`` — never file content.
+_FILENAME_ONLY_RE = re.compile(r"^\*{0,2}[\w./\\-]+\.[A-Za-z0-9_]+\*{0,2}:?$")
+
+
+def _is_filename_only(block: str) -> bool:
+    """True if a fenced block is just a filename header, not actual file content.
+
+    A weak model sometimes emits a stray fence and a bold filename between the tool tag and the real
+    code fence (7b dogfood, task 1). ``_fenced_blocks`` then captures ``**ops.py**`` as the "first
+    block"; taken as the file body it compiles to a syntax error and the edit is wrongly rejected.
+    """
+    stripped = block.strip()
+    return "\n" not in stripped and bool(_FILENAME_ONLY_RE.match(stripped))
+
+
 def _write_content(window: str) -> str | None:
-    """The body for a write_file: the first non-empty fenced block, else a <content> tag."""
+    """Body for a write_file / whole-file edit: the first non-empty fenced block that is real
+    content (a lone filename header is skipped), else a ``<content>`` tag."""
     for block in _fenced_blocks(window):
-        if block.strip():
+        if block.strip() and not _is_filename_only(block):
             return block
     return _param(window, "content")
 
@@ -233,6 +276,29 @@ def _bare_edit_block(window: str) -> SearchReplace | None:
     if not search:
         return None
     return SearchReplace(search, _unfence(m.group(2)))
+
+
+def _recover_whole_file_edit(text: str) -> tuple[int, Action] | None:
+    """Recover a `filename` line immediately above a fenced block as a whole-file edit.
+
+    A real qwen2.5-coder:7b failure on tiny files (Finding C, LATER.md): asked to fix a 2-line
+    file, it drops the ``<tool>`` tag AND the SEARCH/REPLACE markers and just writes ``**ops.py**``
+    then the full new file in a ``` fence. ``parse`` calls this only when nothing else parsed, so it
+    can never override a real tool call. Emits an empty-SEARCH whole-file edit; ``apply_edit`` still
+    validates the target exists, the content isn't truncated, and (for ``.py``) syntax holds first.
+    """
+    m = _FILE_HEADER_RE.search(text)
+    if m is None:
+        return None
+    filename = m.group(1)
+    if not _looks_like_path(filename):
+        return None
+    fence_start = text.rfind("```", m.start(), m.end())
+    content = _write_content(text[fence_start:])  # first non-empty fence after the header
+    if not content:
+        return None
+    edit = EditFileAction(path=filename, edits=(SearchReplace("", content),))
+    return (m.start(), edit)
 
 
 def _int(value: str | None) -> int | None:
