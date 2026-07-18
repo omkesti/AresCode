@@ -37,10 +37,12 @@ captures what actively shapes day-to-day work.
   `edit_file` on the exact tier → pytest green. The 7b first failed because it emitted a
   SEARCH/REPLACE block with **bare `SEARCH`/`REPLACE` and no `<<<<<<< ======= >>>>>>>` markers**;
   `parser.py` now recovers that via `_bare_edit_block` (scoped to the `<tool>edit_file</tool>`
-  window, guarded against false positives), verified by a re-run and by `tests/test_parser_dogfood.py`.
-  This touched the `[HAND]` `parser.py` under the author's explicit authorization — **flagged for
-  verification**. Remaining non-blocking follow-ups (in `LATER.md`): a renderer fix for non-UTF-8
-  stdout, a broader dogfood sweep, and the D11 edit-success re-baseline.
+  window, guarded against false positives), covered by `tests/test_parser_dogfood.py` (bare-marker,
+  fenced-variant, scoping-guard, and conflict-marker-regression cases). This touched the `[HAND]`
+  `parser.py` under the author's explicit authorization; the test coverage clears the earlier
+  verification flag. Remaining non-blocking follow-up (in `LATER.md`): the D11 edit-success
+  re-baseline on the 14B — a headless driver (`scripts/dogfood.py`) now exists to run it; the
+  non-UTF-8 stdout renderer fix (Finding B) and the broader dogfood sweep tooling are done.
 
 Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
 `core/loop.py`, `core/context.py` (system-prompt assembly + token budget + compaction),

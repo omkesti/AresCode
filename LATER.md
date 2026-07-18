@@ -65,12 +65,17 @@ task if the risk bites during dogfooding.
   Watch the `/stats` edit-success rate — it is the north-star metric (TASKS 5, working agreement 5).
 - **Stale edit-success baseline (post-D11).** Every recorded edit-success number — including Phase 3's
   ≥8/10 gauntlet — was measured on `qwen2.5-coder:7b` and is **unverified** on
-  `qwen2.5-coder:14b-instruct`. Re-run the Phase 3 10-task gauntlet once on the 14B to re-baseline.
-  Counters are not reset in code; `/stats` doesn't know which model produced them.
+  `qwen2.5-coder:14b-instruct`. Re-run the Phase 3 10-task gauntlet once on the 14B to re-baseline;
+  `scripts/dogfood.py --model qwen2.5-coder:14b-instruct --ctx 8192` gives a fast 3-task subset of
+  that signal (and prints `/stats` per task) as a starting point. Caveat: on the RTX 3050 the 14b is
+  a coin-flip (see the VRAM-ceiling note below), so a run may need retries and a crashed load is
+  inconclusive, not a re-baseline. Counters are not reset in code; `/stats` doesn't know which model
+  produced them.
 - **VRAM ceiling (<12GB GPUs).** The ≈9GB Q4 14B spills to CPU on a sub-12GB GPU and crawls; the
   ≈4.7GB 7B default fits. Mitigations: 7B default (D13), a smaller per-model `num_ctx` for the 14B
-  (8192), aggressive compaction. Confirmed constraint on the author's RTX 3050 6GB — the 14B crashes
-  at CUDA init there, so the 7B is the only GPU-resident option on that box.
+  (8192), aggressive compaction. Confirmed constraint on the author's RTX 3050 6GB — the 14B is a
+  VRAM-pressure-dependent coin-flip there (loads sometimes, fails CUDA init others), so the 7B is the
+  only *reliable* GPU-resident option on that box.
 - **Loop pathologies.** Small models re-read the same file forever or declare victory early.
   Mitigations: step cap + duplicate-action nudge. Feed any new pathology into the loop as a nudge,
   not a new subsystem.
@@ -107,7 +112,8 @@ that mentions SEARCH/REPLACE is never misread (guarded by a false-positive test)
 `tests/fixtures/model_outputs/bare-search-replace-no-markers.txt` + `tests/test_parser_dogfood.py`
 (now passing, incl. the fenced variant, the scoping guard, and a conflict-marker regression).
 `parser.py` is a `[HAND]` file (D10) — this change was made under the author's explicit
-authorization and is flagged for their verification.
+authorization and is now covered by `tests/test_parser_dogfood.py`, so the verification flag is
+cleared (2026-07-18).
 
 **Finding B — trace renderer crashes on non-UTF-8 stdout (Windows) — FIXED (2026-07-18).**
 `render.tool_start` prints `●` (U+25CF); when stdout is a *redirected* cp1252 pipe rather than a
@@ -119,6 +125,11 @@ Fix: `render.make_console()` (used by `repl.run`) now forces UTF-8 stdout via `r
 residual is `?`-replaced rather than fatal. Headless regression coverage added in
 `tests/test_render.py` (a cp1252 pipe crashes without the guard, survives with it).
 
-**Observation — 14B on the RTX 3050 6GB.** The 14b loaded and ran two full turns this session
-(GPU reported free), contra the earlier "14b crashes at CUDA init" note — likely VRAM-pressure
-dependent. Re-baseline that assumption before relying on either statement.
+**Observation — 14B on the RTX 3050 6GB (reconciled 2026-07-18).** The 14b loaded and ran two full
+turns this session (GPU reported free). This is *consistent* with — not contra — the recorded
+behavior: on this box the 14b is a **VRAM-pressure-dependent coin-flip** — it loads sometimes and
+fails CUDA init other times, even at identical `num_ctx` (full detail in the project memory
+`gpu-vram-6gb-14b-crashes`). A clean run is a load-success sample, not evidence it always loads, so
+there is no contradiction left to resolve. What remains open is only the **D11 re-baseline** (the
+stale-baseline risk above), which needs a *successful* 14b load to mean anything — a crashed load is
+inconclusive, not a data point.
