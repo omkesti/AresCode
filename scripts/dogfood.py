@@ -86,8 +86,12 @@ def _verdict_add_feature(workdir: Path) -> tuple[bool, str]:
     mathutil = (workdir / "mathutil.py").read_text(encoding="utf-8")
     has_cube = "def cube" in mathutil
     proc = _run([sys.executable, "app.py"], workdir)
-    runs = proc.returncode == 0 and "125" in proc.stdout and "25" in proc.stdout
-    out = proc.stdout.split() or proc.stderr.strip()[:60]
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    # Require EXACTLY square(5)=25 then cube(5)=125 — nothing more. A `contains 25 and 125` check
+    # false-passes a duplicated main() (`25 125 25 125`), a fuzzy-match mishap seen in the 14b
+    # baseline; an exact two-line match rejects that corrupted edit.
+    runs = proc.returncode == 0 and lines == ["25", "125"]
+    out = lines or proc.stderr.strip()[:60]
     detail = f"def cube={has_cube}, app.py exit {proc.returncode}, out={out!r}"
     return (has_cube and runs), detail
 

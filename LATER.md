@@ -61,21 +61,23 @@ Not features — open risks tracked so they don't get forgotten. Move a mitigati
 task if the risk bites during dogfooding.
 
 - **Edit-reliability floor.** Even with the full cascade, a local model may fail multi-file or
-  long-range edits. Mitigations in place: whole-file fallback, small-diff prompting, telemetry.
-  Watch the `/stats` edit-success rate — it is the north-star metric (TASKS 5, working agreement 5).
-- **Stale edit-success baseline (post-D11).** Every recorded edit-success number — including Phase 3's
-  ≥8/10 gauntlet — was measured on `qwen2.5-coder:7b` and is **unverified** on
-  `qwen2.5-coder:14b-instruct`. Re-run the Phase 3 10-task gauntlet once on the 14B to re-baseline;
-  `scripts/dogfood.py --model qwen2.5-coder:14b-instruct --ctx 8192` gives a fast 3-task subset of
-  that signal (and prints `/stats` per task) as a starting point. Caveat: on the RTX 3050 the 14b is
-  a coin-flip (see the VRAM-ceiling note below), so a run may need retries and a crashed load is
-  inconclusive, not a re-baseline. Counters are not reset in code; `/stats` doesn't know which model
-  produced them.
-- **VRAM ceiling (<12GB GPUs).** The ≈9GB Q4 14B spills to CPU on a sub-12GB GPU and crawls; the
-  ≈4.7GB 7B default fits. Mitigations: 7B default (D13), a smaller per-model `num_ctx` for the 14B
-  (8192), aggressive compaction. Confirmed constraint on the author's RTX 3050 6GB — the 14B is a
-  VRAM-pressure-dependent coin-flip there (loads sometimes, fails CUDA init others), so the 7B is the
-  only *reliable* GPU-resident option on that box.
+  long-range edits. Mitigations in place: whole-file fallback, small-diff prompting, telemetry. Edit
+  success is the north-star metric, but the 2026-07-18 sweep showed raw `/stats` is a misleading
+  *headline* (blind to unparsed edits — they count as `0 attempted`); read it **alongside** task
+  pass-rate from `scripts/dogfood.py --repeat N` (TASKS 5, working agreement 5).
+- **Edit-success baseline (post-D11) — MEASURED 2026-07-18 (see Dogfood findings below).** A 3-task ×
+  repeat sweep now exists for both models (7b: **6/9** task pass-rate; 14b: **6/6**). The 14b run is
+  at `--ctx 6144`, not 8192 — 8192 500s on the RTX 3050 (VRAM-ceiling note below). What's still not
+  apples-to-apples: Phase 3's original ≥8/10 was a 10-task *edit-tier* number on 7b, versus the new
+  3-task *pass-rate* metric — widen the task set before calling it a like-for-like re-baseline.
+  `/stats` counters are not reset in code and don't know which model produced them.
+- **VRAM ceiling (<12GB GPUs) — quantified 2026-07-18.** The ≈9GB Q4 14B spills to CPU on a sub-12GB
+  GPU and crawls; the ≈4.7GB 7B default fits. On the author's RTX 3050 6GB the 14b's limit is the
+  **KV-cache size set by `num_ctx`**: it reliably **serves at `num_ctx ≤ 6144`** and reliably **500s
+  at 8192** (measured across the baseline sweep plus direct probes at 2048/4096/6144/8192) — a
+  deterministic threshold, not a random coin-flip. So **D12's recommended 8192 for the 14b is too
+  high for this box; use ≤6144 there.** Mitigations: 7B default (D13), a per-model `num_ctx` of 6144
+  (not 8192) for the 14b on a 6GB GPU, aggressive compaction.
 - **Loop pathologies.** Small models re-read the same file forever or declare victory early.
   Mitigations: step cap + duplicate-action nudge. Feed any new pathology into the loop as a nudge,
   not a new subsystem.
@@ -125,11 +127,50 @@ Fix: `render.make_console()` (used by `repl.run`) now forces UTF-8 stdout via `r
 residual is `?`-replaced rather than fatal. Headless regression coverage added in
 `tests/test_render.py` (a cp1252 pipe crashes without the guard, survives with it).
 
-**Observation — 14B on the RTX 3050 6GB (reconciled 2026-07-18).** The 14b loaded and ran two full
-turns this session (GPU reported free). This is *consistent* with — not contra — the recorded
-behavior: on this box the 14b is a **VRAM-pressure-dependent coin-flip** — it loads sometimes and
-fails CUDA init other times, even at identical `num_ctx` (full detail in the project memory
-`gpu-vram-6gb-14b-crashes`). A clean run is a load-success sample, not evidence it always loads, so
-there is no contradiction left to resolve. What remains open is only the **D11 re-baseline** (the
-stale-baseline risk above), which needs a *successful* 14b load to mean anything — a crashed load is
-inconclusive, not a data point.
+**Observation — 14B on the RTX 3050 6GB (quantified 2026-07-18, supersedes the earlier "coin-flip").**
+The 14b's load behavior is **not random** — it is a deterministic `num_ctx`/KV-cache threshold:
+direct probes and a full 6-run baseline sweep show it serves reliably at `num_ctx ≤ 6144` and 500s at
+8192. The earlier "loads sometimes, fails others" impression was almost certainly runs at/near the
+8192 ceiling. Practical rule on this box: run the 14b at `--ctx 6144`. Project memory
+`gpu-vram-6gb-14b-crashes` updated to match.
+
+### 2026-07-18 — first full 3-task baseline sweep, both models (`scripts/dogfood.py --repeat`)
+
+Established the pre-prompt-rewrite baseline: the headless gauntlet (all 3 tasks) on live Ollama, so
+the system-prompt work has a real "before" to be measured against. Raw logs live in the scratchpad
+(`baseline-7b.txt`, `baseline-14b.txt`). Driver enablers added for it — `--system-prompt PATH` (A/B
+an alternate base prompt) and `--repeat N` (a pass RATE, not a noisy 1/1).
+
+| Task | 7b (×3, ctx 16384) | 14b (×2, ctx 6144) |
+|---|---|---|
+| 1 fix-test | **0/3** | 2/2 exact |
+| 2 add-feature | 3/3 exact | 2/2 (via whole-file/fuzzy fallback) |
+| 3 rename-param | 3/3 exact | 2/2 exact |
+| **Overall** | **6/9** | **6/6** |
+
+**Finding C — 7b drops tag-less/marker-less whole-file edits on tiny files (harness gap, OPEN).**
+On the 2-line `ops.py` the 7b writes the fix as a bare markdown block with a bold filename and *no*
+tool tag and *no* SEARCH/REPLACE markers:
+
+    **ops.py**
+    ```python
+    def add(a, b):
+        return a + b
+    ```
+
+This matches none of the parser's three recognized edit forms (conflict-marker; bare-keyword =
+Finding A; this), so the edit is silently dropped (`/stats: 0 attempted`), pytest keeps failing, and
+the stall guard ends the turn — 0/3. The 14b avoids it (uses real SEARCH/REPLACE even on tiny files).
+Per "fix the harness, not the prompt", the likely fix is a **guarded parser recognizer** (filename
+header + a fenced block whose content matches an existing file → whole-file edit), tested like
+`_bare_edit_block`; a prompt-only fix bets on 80%+ instruction-following exactly where the 7b is
+weakest. Decision (prompt vs parser vs both) pending before the prompt rewrite. `parser.py` is
+`[HAND]` (D10) — needs explicit authorization.
+
+**Finding D — 14b SEARCH blocks miss often, lean on the fallback (edit-quality, watch).** The 14b
+passed every task, but its first-try SEARCH blocks frequently no-matched (task 2 run 1: `6 attempted,
+2 applied, 4 failed`), landing only via the whole-file/fuzzy fallback — the cascade working as
+designed. Once, a **fuzzy match corrupted the edit** (duplicated `main()` → `25 125 25 125`) and the
+task-2 verdict false-passed it; the driver verdict is now tightened to require exactly `["25",
+"125"]` (same commit as the enablers). Prompt lever: steer the 14b toward minimal, exact SEARCH
+blocks.
