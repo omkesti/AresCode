@@ -25,14 +25,15 @@ DEFAULT_MODEL = "qwen2.5-coder:7b"
 DEFAULT_CTX = 16384
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify local Ollama for AresCode.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--ctx", type=int, default=DEFAULT_CTX)
-    args = parser.parse_args()
+def run_checks(base_url: str = DEFAULT_BASE_URL, model: str = DEFAULT_MODEL,
+               ctx: int = DEFAULT_CTX) -> int:
+    """Run the three Ollama checks against ``base_url`` (the server *root*, no ``/v1``).
 
-    base = args.base_url.rstrip("/")
+    Returns 0 when the endpoint is reachable and a completion succeeds (missing models and
+    clamped context are warnings, not failures), else 1. Importable so other scripts (e.g.
+    ``scripts/dogfood.py``) can reuse the exact preflight instead of duplicating it.
+    """
+    base = base_url.rstrip("/")
     warnings = 0
 
     # 1. Endpoint reachable + model listed (OpenAI-compat surface).
@@ -45,42 +46,42 @@ def main() -> int:
         return 1
 
     model_ids = [entry.get("id") for entry in resp.json().get("data", [])]
-    if args.model in model_ids:
-        print(f"PASS  model '{args.model}' is available")
+    if model in model_ids:
+        print(f"PASS  model '{model}' is available")
     else:
         warnings += 1
-        print(f"WARN  model '{args.model}' not found. Available: {model_ids or '(none)'}")
-        print(f"      Pull it with:  ollama pull {args.model}")
+        print(f"WARN  model '{model}' not found. Available: {model_ids or '(none)'}")
+        print(f"      Pull it with:  ollama pull {model}")
 
     # 2. Tiny completion with a num_ctx override (Ollama accepts native options in the body).
     payload = {
-        "model": args.model,
+        "model": model,
         "messages": [{"role": "user", "content": "Reply with the single word: ok"}],
         "max_tokens": 8,
         "temperature": 0,
-        "options": {"num_ctx": args.ctx},
+        "options": {"num_ctx": ctx},
     }
     try:
         resp = httpx.post(f"{base}/v1/chat/completions", json=payload, timeout=120)
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
-        print(f"PASS  chat completion succeeded with num_ctx={args.ctx}: {content!r}")
+        print(f"PASS  chat completion succeeded with num_ctx={ctx}: {content!r}")
     except Exception as exc:  # noqa: BLE001
         print(f"FAIL  chat completion failed: {exc}")
         return 1
 
     # 3. Best-effort: warn if the requested context exceeds the model's maximum.
     try:
-        show = httpx.post(f"{base}/api/show", json={"model": args.model}, timeout=10)
+        show = httpx.post(f"{base}/api/show", json={"model": model}, timeout=10)
         if show.status_code == 200:
             info = show.json().get("model_info", {})
             max_ctx = next(
                 (v for k, v in info.items() if k.endswith("context_length")), None
             )
-            if isinstance(max_ctx, int) and args.ctx > max_ctx:
+            if isinstance(max_ctx, int) and ctx > max_ctx:
                 warnings += 1
                 print(
-                    f"WARN  requested num_ctx={args.ctx} exceeds the model maximum "
+                    f"WARN  requested num_ctx={ctx} exceeds the model maximum "
                     f"{max_ctx}; Ollama will clamp it."
                 )
             elif isinstance(max_ctx, int):
@@ -90,6 +91,15 @@ def main() -> int:
 
     print("OK - all checks passed" if warnings == 0 else f"COMPLETED with {warnings} warning(s)")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify local Ollama for AresCode.")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--ctx", type=int, default=DEFAULT_CTX)
+    args = parser.parse_args()
+    return run_checks(args.base_url, args.model, args.ctx)
 
 
 if __name__ == "__main__":

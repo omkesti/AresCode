@@ -9,6 +9,27 @@
 > [`LATER.md`](../LATER.md), and an edit-reliability regression is a note against the `/stats`
 > north-star metric. Measure, don't vibe.
 
+## Push-button sweep (`scripts/dogfood.py`)
+
+The three tasks below are also wired into a headless driver so edit-success can be re-measured with
+one command whenever the harness or prompt changes (the `/stats` north-star check, working
+agreement 5). It preflights Ollama, materializes a deterministic buggy scratch repo per task, drives
+the **real** pipeline (provider → `run_turn` → parser → gate → executor) with the `--yolo`
+auto-approver, applies a task-specific pass/fail check, and prints the log template + `/stats` per
+task. A parse/edit miss dumps the raw model completions to `tests/fixtures/model_outputs/` as a
+parser-corpus candidate (agreement 4). Results are **printed, not auto-appended** — curate what lands
+in this file.
+
+```powershell
+ollama serve                                        # in one terminal
+python scripts/dogfood.py                            # all three tasks on the 7B default
+python scripts/dogfood.py --tasks 1 --verbose        # just the smoke task, full tool trace
+python scripts/dogfood.py --model qwen2.5-coder:14b-instruct --ctx 8192   # re-baseline the 14B
+```
+
+Exit code is 0 only if every selected task passes. The manual walkthrough below is still the source
+of truth for *what* each task exercises and how to log a finding.
+
 ## Before you start
 
 ```powershell
