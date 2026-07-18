@@ -8,8 +8,9 @@ duration, result size), and the final answer as markdown. ``/verbose`` shows ful
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from typing import Any
 
 from rich import box
@@ -45,6 +46,30 @@ _NOTES: tuple[tuple[str, str], ...] = (
         "Run /help at any time to list all slash commands.",
     ),
 )
+
+
+def force_utf8(stream: Any) -> None:
+    """Reconfigure a text stream to UTF-8 output so trace glyphs never crash the turn.
+
+    The tool trace prints ``●`` (U+25CF), box rules, and diff markers. On Windows a *redirected*
+    stdout (a pipe or file, as in a headless dogfood run) defaults to the locale code page —
+    cp1252 — which cannot encode ``●``; rich's write then raises ``UnicodeEncodeError`` and takes
+    down the whole turn (dogfood Finding B). Forcing UTF-8 fixes the common case, and
+    ``errors="replace"`` is a last-resort guard so no glyph can ever raise. Interactive UTF-8
+    terminals are unaffected. Streams without ``reconfigure`` (already wrapped, non-text) are left
+    as-is.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    with suppress(Exception):
+        reconfigure(encoding="utf-8", errors="replace")
+
+
+def make_console() -> Console:
+    """Build the session console, forcing UTF-8 stdout first (see ``force_utf8``)."""
+    force_utf8(sys.stdout)
+    return Console()
 
 
 def _print_wordmark(console: Console) -> None:

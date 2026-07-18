@@ -630,7 +630,7 @@ async def run(
     *, config: Config, project_dir: Path, resume: bool = False, yolo: bool = False
 ) -> None:
     """Run the interactive agent loop until the user exits."""
-    console = Console()
+    console = render.make_console()  # UTF-8-forced so the trace glyphs survive a cp1252 pipe
     console.clear()  # start the session from a clean, top-anchored screen (UX task 3)
     gate = Gate.from_config(project_dir, config)
     approver = auto_approver(console) if yolo else interactive_approver(console)

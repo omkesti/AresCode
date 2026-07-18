@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from rich.console import Console
 
 from arescode.tools.registry import GlobAction, ReadFileAction, ToolResult
-from arescode.ui.render import PREVIEW_LINES, ConsoleObserver, cleared
+from arescode.ui.render import PREVIEW_LINES, ConsoleObserver, cleared, force_utf8
 
 
 def _observer(*, verbose: bool = False) -> tuple[ConsoleObserver, Console]:
@@ -50,6 +51,39 @@ def test_tool_end_previews_error_output() -> None:
     obs.tool_end(ReadFileAction(path="nope.py"), result, 0.1)
     out = console.file.getvalue()
     assert "file not found" in out  # errors are now visible too, not just summarized
+
+
+def _cp1252_console() -> Console:
+    """A console whose stdout is a redirected cp1252 pipe (a headless Windows dogfood run)."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    return Console(file=stream, width=100, force_terminal=False, color_system=None)
+
+
+def test_cp1252_stdout_crashes_without_the_fix() -> None:
+    # Locks in that the trace glyph (●) is genuinely un-encodable on cp1252, so the guard below
+    # is testing something real (dogfood Finding B). If this ever stops raising, the regression
+    # test's premise is gone.
+    obs = ConsoleObserver(_cp1252_console())
+    with pytest.raises(UnicodeEncodeError):
+        obs.tool_start(ReadFileAction(path="x.py"))
+
+
+def test_force_utf8_lets_the_trace_survive_cp1252_stdout() -> None:
+    # The headless repro the dogfood run lacked: with force_utf8 applied, the ● trace line and a
+    # diff carrying non-ASCII glyphs render to a cp1252 pipe without raising (Finding B fix).
+    console = _cp1252_console()
+    force_utf8(console.file)
+    obs = ConsoleObserver(console)
+    obs.tool_start(ReadFileAction(path="x.py"))
+    obs._render_diff("--- a\n+++ b\n-old ●\n+new ●\n")
+    console.file.flush()
+    assert "●".encode() in console.file.buffer.getvalue()  # ● written as UTF-8 bytes
+
+
+def test_force_utf8_is_a_noop_on_streams_without_reconfigure() -> None:
+    # StringIO has no reconfigure(); force_utf8 must tolerate it rather than raise (the guard
+    # path used by the existing StringIO-backed tests and any non-text sink).
+    force_utf8(io.StringIO())  # no exception
 
 
 def test_cleared_shows_only_the_wordmark_and_a_notice() -> None:

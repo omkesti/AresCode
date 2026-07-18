@@ -109,11 +109,15 @@ that mentions SEARCH/REPLACE is never misread (guarded by a false-positive test)
 `parser.py` is a `[HAND]` file (D10) — this change was made under the author's explicit
 authorization and is flagged for their verification.
 
-**Finding B — trace renderer crashes on non-UTF-8 stdout (Windows).** `render.tool_start` prints
-`●` (`●`); when stdout is a legacy cp1252 console/pipe rather than a UTF-8 terminal, rich's
-`legacy_windows_render` raises `UnicodeEncodeError` and takes down the turn. The interactive REPL on
-Windows Terminal (a real UTF-8 tty) is unaffected, but a redirected/legacy-codepage run isn't.
-Candidate fix: force a UTF-8 writer on the `Console` (or gate non-cp1252 glyphs on encoding support).
+**Finding B — trace renderer crashes on non-UTF-8 stdout (Windows) — FIXED (2026-07-18).**
+`render.tool_start` prints `●` (U+25CF); when stdout is a *redirected* cp1252 pipe rather than a
+UTF-8 terminal (as in a headless dogfood run), rich's write raised `UnicodeEncodeError` and took
+down the turn. The interactive REPL on Windows Terminal (a real UTF-8 tty) was always unaffected.
+Fix: `render.make_console()` (used by `repl.run`) now forces UTF-8 stdout via `render.force_utf8`
+(`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`, guarded for streams without
+`reconfigure`) before constructing the `Console`, so UTF-8 pipes get the real glyph and any
+residual is `?`-replaced rather than fatal. Headless regression coverage added in
+`tests/test_render.py` (a cp1252 pipe crashes without the guard, survives with it).
 
 **Observation — 14B on the RTX 3050 6GB.** The 14b loaded and ran two full turns this session
 (GPU reported free), contra the earlier "14b crashes at CUDA init" note — likely VRAM-pressure
