@@ -100,6 +100,9 @@ def test_enter_submits_and_newline_keys_are_bound():
     assert bindings[(Keys.ControlM,)] == "_submit"  # Enter -> send
     assert bindings[(Keys.ControlJ,)] == "_newline"  # Ctrl+J -> newline
     assert bindings[(Keys.Escape, Keys.ControlM)] == "_newline"  # Alt+Enter -> newline
+    # The hand-built Application needs its own abort/EOF bindings (PromptSession supplies these).
+    assert bindings[(Keys.ControlC,)] == "_interrupt"  # Ctrl+C -> KeyboardInterrupt
+    assert bindings[(Keys.ControlD,)] == "_eof"  # Ctrl+D (empty) -> EOFError
 
 
 def _enter_handler():
@@ -143,22 +146,23 @@ def test_enter_without_backslash_submits():
     assert buffer.text == "send me"  # unchanged
 
 
-def test_prompt_message_brackets_input_with_a_top_rule():
-    # The prompt is the top rule on its own line, then the inline '> ' (UX tasks 1-2).
-    msg = repl_mod._prompt_message()
-    assert msg[-1][1] == "> "  # trailing inline prompt
-    assert msg[-1][0].endswith("bold")  # in the brand colour, bold
-    assert any(repl_mod.RULE_CHAR in text for _style, text in msg)  # a rule sits above it
-    # There is a newline between the rule fragment and the '> ' so the rule gets its own line.
-    assert msg[-2] == ("", "\n")
-
-
-def test_bottom_rule_is_a_solid_full_width_rule():
-    # The bottom_toolbar rule: a single fragment of rule characters, nothing else.
-    rule = repl_mod._bottom_rule()
+def test_rule_fragments_is_a_solid_full_width_rule():
+    # Each bracketing rule is a single fragment of rule characters in the shadow purple.
+    rule = repl_mod._rule_fragments()
     assert len(rule) == 1
-    _style, text = rule[0]
+    style, text = rule[0]
     assert text and set(text) == {repl_mod.RULE_CHAR}
+    assert "fg:" in style  # coloured, not default
+
+
+def test_input_box_prompt_prefix_only_on_first_line():
+    # The '> ' brand prompt marks the first line; continuation/wrapped lines align under it.
+    first = repl_mod._InputBox._line_prefix(0, 0)
+    assert first[0][1] == "> "
+    assert first[0][0].endswith("bold")
+    # Second logical line, or a wrap of the first, gets a plain two-space indent (no '>').
+    assert repl_mod._InputBox._line_prefix(1, 0) == [("", "  ")]
+    assert repl_mod._InputBox._line_prefix(0, 1) == [("", "  ")]
 
 
 def test_verbose_command_toggles():

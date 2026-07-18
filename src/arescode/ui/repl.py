@@ -18,10 +18,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application, get_app
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.styles import Style
+from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
 from rich.console import Console
 
 from arescode.config import BUILTIN_DEFAULT_MODEL, Config, read_last_model, save_last_model
@@ -46,12 +50,10 @@ from arescode.ui import render, theme
 from arescode.ui.approve import auto_approver, interactive_approver
 from arescode.ui.model_select import free_text_model, pick_model
 
-# The input box chrome (UX tasks 1-2): the prompt sits between two dim horizontal rules — a top
-# rule carried in the prompt message and a bottom rule pinned just under the input via
-# prompt_toolkit's bottom_toolbar. Because the toolbar stays put while the buffer above it grows,
-# the box expands upward (the top rule slides up) as the input wraps onto more lines. Both are
-# callables, re-evaluated every render, so the rules track the terminal width through live resizes.
-# Formatted-text tuples, since rich markup means nothing to PromptSession.
+# The input box chrome (UX bugs 1-3): a '> ' prompt bracketed by two dim horizontal rules. The box
+# hugs its content — one line tall by default, growing and shrinking with the text — and stays
+# pinned at the bottom of the terminal. See _InputBox for why this is a hand-built Application
+# rather than a PromptSession (the toolbar-based version ballooned to fill the screen).
 RULE_CHAR = "─"
 
 
@@ -60,33 +62,9 @@ def _hrule() -> str:
     return RULE_CHAR * max(1, shutil.get_terminal_size((80, 24)).columns)
 
 
-def _prompt_message() -> list[tuple[str, str]]:
-    """Prompt text: a blank spacer, the top rule on its own line, then the brand-purple '> '.
-
-    prompt_toolkit splits a multiline message at the last newline: everything before it renders as
-    the block above the input (giving the rule its own line) and the trailing '> ' becomes the
-    inline prefix on the first input line.
-    """
-    return [
-        ("", "\n"),
-        (f"fg:{theme.SHADOW}", _hrule()),
-        ("", "\n"),
-        (f"fg:{theme.PRIMARY} bold", "> "),
-    ]
-
-
-def _bottom_rule() -> list[tuple[str, str]]:
-    """The bottom rule of the input box; a bottom_toolbar, so it stays put as the input grows."""
+def _rule_fragments() -> list[tuple[str, str]]:
+    """Formatted text for one full-width rule in the dim shadow purple (re-sized each render)."""
     return [(f"fg:{theme.SHADOW}", _hrule())]
-
-
-# Drop prompt_toolkit's default reverse-video bar so the bottom_toolbar reads as a thin rule.
-_PROMPT_STYLE = Style.from_dict(
-    {
-        "bottom-toolbar": f"noreverse fg:{theme.SHADOW} bg:default",
-        "bottom-toolbar.text": f"noreverse fg:{theme.SHADOW} bg:default",
-    }
-)
 
 # Two Ctrl+C within this many seconds exits AresCode; a lone Ctrl+C only cancels the current turn
 # (or, at an idle prompt, arms the exit and prints a hint).
@@ -200,6 +178,10 @@ def _build_key_bindings() -> KeyBindings:
     So Enter submits, and to continue onto a new line you end the line with a backslash
     (shell-style ``\\`` + Enter, which consumes the backslash). Ctrl+J stays bound as a
     terminal-reliable fallback for a bare newline.
+
+    Ctrl+C / Ctrl+D are bound here too: the input box is a hand-built Application (not a
+    PromptSession), so it doesn't get PromptSession's abort/EOF bindings for free — they are
+    what let the REPL loop see ``KeyboardInterrupt`` / ``EOFError`` from a read.
     """
     kb = KeyBindings()
 
@@ -218,6 +200,17 @@ def _build_key_bindings() -> KeyBindings:
     @kb.add("escape", "enter")  # Alt+Enter: newline where the terminal delivers it
     def _newline(event) -> None:
         event.current_buffer.insert_text("\n")
+
+    @kb.add("c-c")
+    def _interrupt(event) -> None:
+        # Abort the read; the REPL loop turns this into "press Ctrl+C again to exit".
+        event.app.exit(exception=KeyboardInterrupt())
+
+    @kb.add("c-d", filter=Condition(lambda: not get_app().current_buffer.text))
+    def _eof(event) -> None:
+        # Ctrl+D on an empty line exits AresCode (EOFError bubbles to the REPL loop). With text
+        # present the default binding still deletes the character under the cursor.
+        event.app.exit(exception=EOFError())
 
     return kb
 
@@ -437,6 +430,66 @@ def _history_path() -> Path:
     return directory / "history"
 
 
+class _InputBox:
+    """The bottom-pinned, content-hugging prompt: a ``> `` line bracketed by two rules.
+
+    Built on a hand-wired prompt_toolkit ``Application`` instead of ``PromptSession`` so the box
+    hugs its content. The trick is the flexible *filler* window above the box: it soaks up the empty
+    space between the cursor and the bottom of the terminal, so the input itself stays sized to the
+    text — one line by default, growing and shrinking as lines are added or deleted (bugs 1-2) — and
+    after ``/clear`` the box sits at the bottom of the screen instead of stretching up to the
+    wordmark (bug 3). A ``PromptSession`` with a bottom-toolbar rule can't do this: its buffer
+    window stretches to fill the reserved height, ballooning the box.
+
+    Enter submits; ``\\``+Enter / Ctrl+J / Alt+Enter insert a newline; Ctrl+C and Ctrl+D raise
+    ``KeyboardInterrupt`` / ``EOFError`` (see :func:`_build_key_bindings`), so the REPL loop drives
+    it exactly like the old ``prompt_async`` call.
+    """
+
+    def __init__(self) -> None:
+        self.buffer = Buffer(
+            multiline=True,
+            history=FileHistory(str(_history_path())),
+            accept_handler=self._accept,
+        )
+        input_window = Window(
+            BufferControl(buffer=self.buffer),
+            height=Dimension(min=1),
+            dont_extend_height=True,  # size to the text; the filler (not this) absorbs slack
+            wrap_lines=True,
+            get_line_prefix=self._line_prefix,
+        )
+        body = HSplit(
+            [
+                Window(),  # flexible filler: pushes the box to the bottom, hugging its content
+                Window(FormattedTextControl(_rule_fragments), height=1, dont_extend_height=True),
+                input_window,
+                Window(FormattedTextControl(_rule_fragments), height=1, dont_extend_height=True),
+            ]
+        )
+        self.app: Application = Application(
+            layout=Layout(body, focused_element=input_window),
+            key_bindings=_build_key_bindings(),
+            full_screen=False,
+        )
+
+    @staticmethod
+    def _accept(buffer: Buffer) -> bool:
+        get_app().exit(result=buffer.text)
+        return True  # keep the submitted text on screen as this turn's record in the scrollback
+
+    @staticmethod
+    def _line_prefix(line_number: int, wrap_count: int) -> list[tuple[str, str]]:
+        if line_number == 0 and wrap_count == 0:
+            return [(f"fg:{theme.PRIMARY} bold", "> ")]
+        return [("", "  ")]  # align continuation and wrapped lines under the prompt
+
+    async def read(self) -> str:
+        """Prompt for one message; raises EOFError (Ctrl+D) / KeyboardInterrupt (Ctrl+C)."""
+        self.buffer.reset()  # start each turn from an empty box
+        return await self.app.run_async()
+
+
 def _load_session(
     project_dir: Path, config: Config, console: Console, *, resume: bool
 ) -> SessionState:
@@ -613,13 +666,7 @@ async def run(
             "Hard-denied commands and path escapes are still blocked.[/bold red]"
         )
 
-    prompt_session: PromptSession = PromptSession(
-        history=FileHistory(str(_history_path())),
-        multiline=True,
-        key_bindings=_build_key_bindings(),
-        bottom_toolbar=_bottom_rule,
-        style=_PROMPT_STYLE,
-    )
+    input_box = _InputBox()
 
     # Timestamp of the last Ctrl+C, shared across the prompt and the in-turn handler: a second
     # Ctrl+C within DOUBLE_INTERRUPT_WINDOW exits, so "double Ctrl+C" works from either context.
@@ -746,7 +793,7 @@ async def run(
 
     while True:
         try:
-            user_input = await prompt_session.prompt_async(_prompt_message)
+            user_input = await input_box.read()
         except EOFError:  # Ctrl+D still exits
             break
         except KeyboardInterrupt:  # Ctrl+C at the prompt: press again quickly to exit
