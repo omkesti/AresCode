@@ -3,7 +3,7 @@
 > A Claude Code–style terminal coding agent that runs entirely on local models via Ollama.
 > This document is the single source of truth for the project's goals, architecture, design decisions, and structure. Feed it to any AI assistant or new collaborator to get them fully up to speed.
 
-**Status:** Phases 0–6 complete. Phase 6 (Polish) shipped — slash commands (incl. `/sessions`, `/resume`), a first-run preflight, the error-path sweep, packaging (incl. bundling `prompts/system.md` in the wheel), `LATER.md`, and the dogfood gauntlet. **The MVP Definition of Done is met**: "fix the failing test" runs end-to-end on live `qwen2.5-coder:14b-instruct` **and** `qwen2.5-coder:7b` (2026-07-17) — a bare-marker parser gap that first blocked the 7b was fixed and re-verified. Open follow-ups (non-blocking): a broader multi-task dogfood sweep, the D11 edit-success re-baseline, and a renderer robustness fix for non-UTF-8 stdout (all logged in `LATER.md`).
+**Status:** Phases 0–6 complete. Phase 6 (Polish) shipped — slash commands (incl. `/sessions`, `/resume`), a first-run preflight, the error-path sweep, packaging (incl. bundling `prompts/system.md` in the wheel), `LATER.md`, and the dogfood gauntlet. **The MVP Definition of Done is met**: "fix the failing test" runs end-to-end on live `qwen2.5-coder:14b-instruct` **and** `qwen2.5-coder:7b` (2026-07-17) — a bare-marker parser gap that first blocked the 7b was fixed and re-verified. Post-MVP hardening (2026-07-18, on the `system-prompt-enhancement` branch): the parser now recovers the tag-less / whole-file edit shapes weak models emit on tiny files (Finding C), the base system prompt was compacted to ~1160 tokens (measured, no regression), the non-UTF-8 renderer crash (Finding B) is fixed, and edit-success baselines now exist for **both** models via the headless `scripts/dogfood.py --repeat` driver (7b 6/9→8/9, 14b 6/6) — full write-up in `implementation/`. Remaining open item: a broader multi-task dogfood sweep (`LATER.md`).
 **Name:** `AresCode`
 **Default model:** `qwen2.5-coder:7b` via Ollama (low-VRAM-safe out of the box); `qwen2.5-coder:14b-instruct` is the stronger opt-in — switch at runtime with `/model` and it is remembered as the default from the next launch on (D13)
 **Author:** Om — solo project
@@ -149,6 +149,7 @@ The parser is written assuming the model *almost* gets the format right. It must
 - Filename placed 1–3 lines above/below where expected (hunt for it)
 - Nested fences inside code content
 - Multiple actions per response, in any order
+- **Tag-less / marker-less whole-file edits** — on tiny files a weak model drops the `<tool>` tag *and* the SEARCH/REPLACE markers and just pastes the new file under a `**filename**` header; the parser recovers this as a whole-file edit (Finding C, 2026-07-18; guarded so it never fires when a real action already parsed). Also handled: bare `SEARCH`/`REPLACE` labels with no conflict markers (Finding A), and a stray fence + filename header before the code fence (which must not be taken as the file body).
 
 **SEARCH-block matching cascade (in `tools/edit.py`):**
 1. Exact string match
@@ -209,7 +210,7 @@ Deny-first philosophy, per-action approval:
 
 **Ollama-specific gotchas (hard-won, do not skip):**
 - `num_ctx` **must be set explicitly** — Ollama defaults to 4096 tokens regardless of model capability, which silently truncates agent context and looks like "the model is dumb." Set 16k default; 32k is qwen2.5-coder's max but watch KV-cache VRAM.
-- **14B VRAM budget:** the opt-in `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights, and the KV cache grows with `num_ctx` on top of that. On a GPU with <12GB VRAM (e.g. an RTX 3050 6GB) Ollama offloads layers to the CPU and generation slows sharply; the weights + a large KV cache spill to system RAM and crawl. Mitigation: drop `num_ctx` to 8192, or stay on the default `qwen2.5-coder:7b` (≈4.7GB) on low-VRAM machines.
+- **14B VRAM budget:** the opt-in `qwen2.5-coder:14b-instruct` Q4 is ≈9GB of weights, and the KV cache grows with `num_ctx` on top of that. On a GPU with <12GB VRAM (e.g. an RTX 3050 6GB) Ollama offloads layers to the CPU and generation slows sharply; the weights + a large KV cache spill to system RAM and crawl. Mitigation: keep the 14B at `num_ctx ≤ 6144`, or stay on the default `qwen2.5-coder:7b` (≈4.7GB) on low-VRAM machines. **Measured on a 6GB RTX 3050 (2026-07-18): `num_ctx = 8192` fails to load (HTTP 500); 6144 is the ceiling** — so D12's 8192 recommendation is too high for a 6GB GPU.
 - `temperature`: 0.0–0.2 for agentic work.
 - `keep_alive`: set generously (e.g. `30m`) so the model isn't reloaded between turns.
 
@@ -231,7 +232,7 @@ with no section inherits the top-level defaults:
 | Model | `num_ctx` | Rationale |
 |---|---|---|
 | `qwen2.5-coder:7b` (≈4.7GB Q4) | 16384 | Weights + KV cache fit VRAM comfortably; use the fuller window. |
-| `qwen2.5-coder:14b-instruct` (≈9GB Q4) | 8192 | On a <12GB GPU the weights already spill to CPU; a smaller KV cache keeps generation from crawling. |
+| `qwen2.5-coder:14b-instruct` (≈9GB Q4) | ≤8192 (**6144 on 6GB**) | On a <12GB GPU the weights already spill to CPU; a smaller KV cache keeps generation from crawling. **On a 6GB GPU 8192 fails to load (HTTP 500); 6144 is the measured ceiling (2026-07-18).** |
 | any other tag | top-level default | Falls back to the `num_ctx`/`temperature` defaults in the config root. |
 
 On a switch the token budget is recomputed for the new window; if the history no longer fits a
@@ -250,6 +251,8 @@ while an explicit `model` in a config file or a `--model` flag still overrides i
 ### 4.8 System prompt (`prompts/system.md`)
 
 Versioned in the repo, never hardcoded in Python. Contents: role definition, the action protocol spec with 2–3 few-shot examples per tool, the SEARCH/REPLACE rules, "read before you edit" and "run tests after edits" behavioral rules, the repo map, and ARES.md contents. Keep the static portion under ~2,000 tokens — every token here is paid every single model call.
+
+**As tuned (2026-07-18).** The base prompt is ~1160 tokens — a measured **33% cut** from an intermediate verbose version, validated on both models via `scripts/dogfood.py` (no regression). Two lessons the measurement forced: (1) aggressively shortening the prompt *regressed* the 7b (it clobbered files / skipped read-before-edit), so cutting length must be earned by a dogfood run, not assumed; (2) a compact prompt stays reliable only when the reinforcement lives in a **worked example** rather than repeated prose — the shipped example demonstrates the *add* pattern (read → `edit_file`-append → verify), the exact shape the 7b was failing on multi-file edits. The taught edit form is the tagged `<tool>edit_file</tool>` + SEARCH/REPLACE. Full research + baselines in `implementation/`.
 
 ---
 
@@ -352,8 +355,8 @@ Each milestone ships as a usable tool. Do not start M(n+1) before dogfooding M(n
 ## 9. Known risks
 
 - **Edit reliability floor:** even with the full cascade, a local model may fail multi-file or long-range edits. Mitigation: whole-file fallback, small-diff prompting, and honest measurement (track edit success rate from day one).
-- **Stale edit-success baseline (post-D11):** every edit-success number to date — including Phase 3's ≥8/10 gauntlet result — was measured on `qwen2.5-coder:7b` and is now stale. The telemetry counters are *not* reset in code, but treat the recorded figures as unverified until Phase 3's 10-task edit gauntlet is re-run **once** on `qwen2.5-coder:14b-instruct` to establish the new baseline. `/stats` reports raw counters; it does not know which model produced them.
-- **VRAM ceiling (<12GB GPUs, e.g. RTX 3050 6GB):** the default is the ≈4.7GB `qwen2.5-coder:7b`, which fits comfortably; the ceiling bites only when the user opts into `qwen2.5-coder:14b-instruct` (D13). Its Q4 weights are ≈9GB, so on a sub-12GB GPU Ollama offloads to CPU and the weights + a large KV cache spill to system RAM and crawl. Mitigation: keep the 7B default, a smaller per-model window for the 14B (8192, drop from the 16k default), aggressive compaction, and documented `num_ctx`/VRAM tradeoffs.
+- **Edit-success baseline (post-D11) — measured 2026-07-18.** A 3-task × repeat dogfood sweep now exists for both models (`qwen2.5-coder:7b` 6/9 → **8/9** after the parser fix; `14b-instruct` **6/6** at `num_ctx = 6144`). Still not apples-to-apples with Phase 3's original ≥8/10 (a 10-task *edit-tier* number on 7b vs the new task-*pass-rate* metric), so widen the task set before calling it a like-for-like re-baseline. `/stats` reports raw counters, does not know which model produced them, and **undercounts unparsed edits** — read it alongside the dogfood task pass-rate. Full baselines + logs in `implementation/`.
+- **VRAM ceiling (<12GB GPUs, e.g. RTX 3050 6GB):** the default is the ≈4.7GB `qwen2.5-coder:7b`, which fits comfortably; the ceiling bites only when the user opts into `qwen2.5-coder:14b-instruct` (D13). Its Q4 weights are ≈9GB, so on a sub-12GB GPU Ollama offloads to CPU and the weights + a large KV cache spill to system RAM and crawl. Mitigation: keep the 7B default, a smaller per-model window for the 14B (**6144 on a 6GB GPU** — measured 2026-07-18: `num_ctx = 8192` fails to load with an HTTP 500; 6144 is the ceiling, so D12's 8192 is too high there), aggressive compaction, and documented `num_ctx`/VRAM tradeoffs.
 - **Loop pathologies:** small models re-read the same file forever or declare victory early. Mitigation: step cap, duplicate-action detection (same tool + same args twice in a row → inject a nudge message).
 - **Prompt injection via tool results:** file contents and command output are untrusted. Gate logic never consults model prose; hardening is a tracked post-MVP item.
 - **Scope creep:** the Claude Code feature list is enormous. The MVP definition in §1 is the contract — anything else goes to a `LATER.md`.

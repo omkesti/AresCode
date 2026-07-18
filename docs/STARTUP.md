@@ -39,8 +39,10 @@ the REPL with `/model` (your choice is remembered as the default next launch —
 ollama pull qwen2.5-coder:14b-instruct
 ```
 
-> On a GPU with <12 GB VRAM, Ollama offloads part of the 14B model to CPU (slower). If generation
-> is too slow, either drop its `num_ctx` to 8192 or stay on the default `qwen2.5-coder:7b`.
+> On a GPU with <12 GB VRAM, Ollama offloads part of the 14B model to CPU (slower). On a 6GB GPU
+> (e.g. RTX 3050) `num_ctx = 8192` **fails to load** (HTTP 500); the measured ceiling is **6144**.
+> If generation is too slow, keep the 14B at `num_ctx ≤ 6144` or stay on the default
+> `qwen2.5-coder:7b`.
 
 Confirm it is installed and the server is up:
 
@@ -241,7 +243,7 @@ num_ctx = 16384                     # ≈4.7GB Q4: weights + KV cache fit VRAM, 
 temperature = 0.1
 
 [models."qwen2.5-coder:14b-instruct"]
-num_ctx = 8192                      # ≈9GB Q4: on a <12GB GPU weights spill to CPU — keep the KV cache small
+num_ctx = 6144                      # ≈9GB Q4: on a 6GB GPU 8192 fails to load (500); 6144 is the measured ceiling
 temperature = 0.1
 ```
 
@@ -289,4 +291,4 @@ python scripts/check_ollama.py
 | Model feels "dumb" / truncated | Confirm `num_ctx` is set (Ollama silently defaults to 4096). |
 | PowerShell won't activate the venv | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then re-activate. |
 | `rg: command not found` in a search | Install ripgrep and ensure it's on `PATH`. |
-| 14B slow / VRAM thrash on a <12 GB GPU | Ollama offloaded to CPU; lower `num_ctx` (e.g. 8192), or fall back to `qwen2.5-coder:7b`. |
+| 14B slow / VRAM thrash on a <12 GB GPU | Ollama offloaded to CPU; lower `num_ctx` (≤6144 on a 6GB GPU — 8192 fails with a 500), or fall back to `qwen2.5-coder:7b`. |

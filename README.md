@@ -7,9 +7,12 @@ change you want, review the proposed file edits or shell commands, and keep the 
 own machine. It is designed around a small, reliable tool surface and a deny-first permission gate
 so weaker local models can still operate through a robust harness.
 
-> Status: early development. Phases 0-5 are complete: package/config, streaming REPL, tools and
-> loop, SEARCH/REPLACE editing, the trust/permission layer, and the endurance layer (repo map,
-> `ARES.md` project memory, and token-budget compaction). Phase 6 is polish and packaging.
+> Status: MVP complete. Phases 0-6 are done: package/config, streaming REPL, tools and loop,
+> SEARCH/REPLACE editing, the trust/permission layer, the endurance layer (repo map, `ARES.md`
+> project memory, token-budget compaction), and polish/packaging. The MVP Definition of Done —
+> "fix the failing test," end-to-end on a live local model — is met on both `qwen2.5-coder:7b` and
+> `14b-instruct`. Recent hardening: parser recovery of the tiny-file edit shapes weak models emit,
+> plus a compact system prompt; see [`implementation/`](implementation/).
 
 ## Why AresCode
 
@@ -192,7 +195,7 @@ num_ctx = 16384
 temperature = 0.1
 
 [models."qwen2.5-coder:14b-instruct"]
-num_ctx = 8192
+num_ctx = 6144   # 6GB GPUs (e.g. RTX 3050): 8192 fails to load; 6144 is the measured ceiling
 temperature = 0.1
 ```
 
@@ -262,10 +265,11 @@ Completed:
 - Phase 3: SEARCH/REPLACE editing with fallbacks and telemetry
 - Phase 4: deny-first permission gate with previews and hard denials
 - Phase 5: repo map, `ARES.md` project memory, token accounting, and summarizing compaction
+- Phase 6: polish, packaging (`pipx`), first-run preflight, and the headless dogfood driver
 
-Next:
-
-- Phase 6: polish, packaging workflow, and additional operator ergonomics
+The MVP Definition of Done is met on both `qwen2.5-coder:7b` and `14b-instruct`. Post-MVP hardening —
+parser edit-recovery and a compact, measured system prompt — is documented in
+[`implementation/`](implementation/); deferred scope lives in [`LATER.md`](LATER.md).
 
 See [`docs/TASKS.md`](docs/TASKS.md) for the implementation plan.
 

@@ -41,8 +41,16 @@ captures what actively shapes day-to-day work.
   fenced-variant, scoping-guard, and conflict-marker-regression cases). This touched the `[HAND]`
   `parser.py` under the author's explicit authorization; the test coverage clears the earlier
   verification flag. Remaining non-blocking follow-up (in `LATER.md`): the D11 edit-success
-  re-baseline on the 14B — a headless driver (`scripts/dogfood.py`) now exists to run it; the
-  non-UTF-8 stdout renderer fix (Finding B) and the broader dogfood sweep tooling are done.
+  re-baseline on the 14B — a headless driver (`scripts/dogfood.py`) ran it (7b 8/9, 14b 6/6 at
+  `num_ctx=6144`); the non-UTF-8 renderer fix (Finding B) and the dogfood sweep tooling are done.
+- **Post-MVP hardening (2026-07-18, `system-prompt-enhancement` branch).** `parser.py` now also
+  recovers the **tag-less / marker-less whole-file edits** the 7b emits on tiny files (Finding C) —
+  plus a stray fence + `**filename**` header that must not be read as file content — taking the 7b's
+  flagship "fix the test" task from **0/3 → passing**. The base **system prompt was compacted to
+  ~1160 tokens** (measured on both models, no regression: the reinforcement a weak model needs lives
+  in a worked *add*-pattern example, not repeated prose). The **dogfood driver gained `--repeat` and
+  `--system-prompt`**. Full write-up in `implementation/`; remaining open item: a broader multi-task
+  dogfood sweep (`LATER.md`).
 
 Implemented modules: `config.py`, `main.py`, `providers/*`, `core/state.py`, `core/parser.py`,
 `core/loop.py`, `core/context.py` (system-prompt assembly + token budget + compaction),
@@ -116,13 +124,18 @@ without removing the reason the floor exists.
 
 - **`core/loop.py`, `core/parser.py`, and the edit cascade in `tools/edit.py` are hand-written by
   the author, not AI-generated** (decision D10 — explicit skill-building goal). Do not autonomously
-  author these; offer review/pairing and write their tests instead.
+  author these; offer review/pairing and write their tests instead. **The author has since relaxed
+  this conditionally** (see memory `hand-files-editable-if-required`): these files *may* be edited
+  when a fix genuinely belongs there — kept minimal and flagged for verification — as was done for
+  the Finding A/C parser recoveries. Still: don't autonomously *rewrite* them, and keep changes small.
 - **`parser.py` and `edit.py` get the deepest test coverage** — table-driven tests over a corpus of
   real malformed model outputs collected during development (`tests/fixtures/model_outputs/`). This
   is where local-model unreliability concentrates; treat coverage here as non-negotiable.
 - **`num_ctx` must always be set explicitly** on Ollama calls (default 16384). Ollama silently
   defaults to 4096 regardless of model capability, which truncates context and masquerades as "the
-  model is dumb." A reasoning failure? Check `num_ctx` first.
+  model is dumb." A reasoning failure? Check `num_ctx` first. **On a 6GB GPU the 14B has a hard
+  ceiling: `num_ctx = 8192` fails to load (HTTP 500); 6144 is the max** (measured 2026-07-18) — D12's
+  8192 is too high there, so use `[models."qwen2.5-coder:14b-instruct"] num_ctx = 6144`.
 - **REPL input: Enter sends; a trailing backslash before Enter (shell-style `\` + Enter) inserts a
   newline, with Ctrl+J as a terminal-reliable fallback (Alt+Enter too where delivered)** — a
   deliberate inversion of the default prompt_toolkit multiline binding (and of the literal wording

@@ -24,11 +24,18 @@ in this file.
 ollama serve                                        # in one terminal
 python scripts/dogfood.py                            # all three tasks on the 7B default
 python scripts/dogfood.py --tasks 1 --verbose        # just the smoke task, full tool trace
-python scripts/dogfood.py --model qwen2.5-coder:14b-instruct --ctx 8192   # re-baseline the 14B
+python scripts/dogfood.py --repeat 3                  # each task x3 -> a pass RATE, not a noisy 1/1
+python scripts/dogfood.py --system-prompt PATH        # A/B an alternate base prompt (prompt/parser work)
+python scripts/dogfood.py --model qwen2.5-coder:14b-instruct --ctx 6144   # 14B (6144 = the 6GB ceiling; 8192 500s)
 ```
 
-Exit code is 0 only if every selected task passes. The manual walkthrough below is still the source
-of truth for *what* each task exercises and how to log a finding.
+Exit code is 0 only if every selected task passes. **`--repeat N`** reports a per-task pass rate — the
+metric of record, since raw `/stats` undercounts unparsed edits (it counts an unrecognized edit as
+`0 attempted`). **`--system-prompt PATH`** swaps the base prompt so a prompt change can be measured
+before it ships. Note: **background runs hit a duration limit mid-sweep — run foreground, and split
+per-task for the slow 14B**. The 2026-07-18 baseline for both models (7B 6/9→8/9 after the parser
+fix, 14B 6/6) is written up in [`implementation/`](../implementation/). The manual walkthrough below
+is still the source of truth for *what* each task exercises and how to log a finding.
 
 ## Before you start
 
@@ -73,5 +80,5 @@ For each: does the agent finish autonomously? Do the diffs apply cleanly through
 At least the "fix the failing test" task must complete end-to-end — find the file, edit it, rerun
 the tests, report success — with every write/command approved through the gate, using only the local
 model. If it can't, the fix belongs in the harness (parser/cascade/prompt), not in lowering the bar.
-Re-baseline the D11 edit-success numbers on `qwen2.5-coder:14b-instruct` while you're here (see
-`context.md` §9 "stale baseline").
+The D11 edit-success re-baseline was run on 2026-07-18 (7B 8/9, 14B 6/6 at `num_ctx = 6144`; see
+`implementation/` and `context.md` §9); a broader multi-task sweep is the remaining open item.
