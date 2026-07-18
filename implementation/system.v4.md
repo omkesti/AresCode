@@ -84,31 +84,25 @@ FULL FILE CONTENTS
 
 # Example — structure only, do not perform it
 
-This shows the *shape* of adding to an existing file. `demo_util.py` is a placeholder, not a real
-file here — copy the structure, not the task. First read the file to see its exact contents:
+This shows the *shape* of an edit. `demo_widget.py` is a placeholder, not a real file here — copy the
+structure, not the task.
 ```
-<tool>read_file</tool><path>demo_util.py</path>
+<tool>read_file</tool><path>demo_widget.py</path>
 ```
-Say it comes back as `def alpha():` then `    return 1`. To ADD a function while keeping `alpha`,
-put an existing line in SEARCH and repeat it in REPLACE with the new code after it — never replace
-what you want to keep, and never use `write_file` on a file that already exists:
+Then apply the change:
 ```
-<tool>edit_file</tool><path>demo_util.py</path>
+<tool>edit_file</tool><path>demo_widget.py</path>
 <<<<<<< SEARCH
-    return 1
+timeout = 3
 =======
-    return 1
-
-
-def beta():
-    return 2
+timeout = 5
 >>>>>>> REPLACE
 ```
 Then verify with the tests, and give your plain-text answer once they pass:
 ```
 <tool>bash</tool><cmd>python -m pytest -q</cmd>
 ```
-`Done — added beta; tests pass.`
+`Done — timeout is now 5; tests pass.`
 
 Work only on the user's real request. Project conventions and commands, when present, are in the
 project's `ARES.md`.

@@ -114,3 +114,34 @@ failed every time at baseline. The 14b holds under a stricter check. The win is 
 robustness fix** (accept the tiny-file edit shape the 7b naturally produces); the prompt enhancement
 is conservative and measured not to regress. Every number here is a task pass-rate from the real loop
 on the live models, not a guess.
+
+## Compact prompt — the token-efficiency follow-up (v3 → v4 → v5, SHIPPED)
+
+v3 was safe but barely smaller than the original (~1736 vs ~1610 tokens) — it enhanced *structure*,
+not size. Since the prompt eats ~29% of the 14b's 6144 window before reasoning starts, a genuinely
+compact prompt was worth chasing — but only if it held performance. (Note: the earlier compact
+attempt's 4/9 was **confounded** — it predated the `_write_content` parser fix — so it was re-tested
+cleanly here.)
+
+- **v4 (compact, ~1046 tok, −40%)** regressed the 7b: task 2 **0/2**. Failure mode — the 7b tried
+  `write_file mathutil.py` (to *create* it) instead of reading it and using `edit_file` to append
+  `cube`, so `cube` never landed and `app.py` broke. Verbose v3 prevents this by *repeating* the
+  read/edit rules; the compact prompt's single mention wasn't enough.
+- **v5 (compact, ~1160 tok, −33%)** fixed it surgically: the worked example now **demonstrates the
+  ADD pattern** (read → `edit_file` keeping the existing line + appending → verify) — the exact shape
+  the 7b was failing. A better *example*, not more prose.
+
+Measured against the fully-fixed parser:
+
+| Task | v5 — 7b (×3, ctx 16384) | v5 — 14b (×2, ctx 6144) |
+|---|---|---|
+| 1 fix-test | 2/3 | 2/2 |
+| 2 add-feature | **3/3** (v4 was 0/2) | 2/2 (clean, not via fallback) |
+| 3 rename-param | 3/3 | 2/2 |
+| **Overall** | **8/9** | **6/6** |
+
+**Decision: ship v5** (promoted to `prompts/system.md`). It matches v3's performance on both models
+at **33% fewer tokens** (~576 saved per call, ~9% of the 14b's window reclaimed for reasoning). The
+one 7b task-1 miss is within the parser-recovery noise. Refined lesson: a compact prompt **can** work
+on a weak model — the reinforcement the 7b needs can live in a well-chosen worked **example** rather
+than in repeated prose. Raw logs: `logs/v5-*.txt`.
