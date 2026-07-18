@@ -201,7 +201,10 @@ def _dump_completions(task: Task, state: SessionState, stamp: str) -> Path:
     return path
 
 
-async def run_one(task: Task, config: Config, *, verbose: bool, keep: bool) -> TaskReport:
+async def run_one(
+    task: Task, config: Config, *, verbose: bool, keep: bool,
+    system_prompt_text: str | None = None,
+) -> TaskReport:
     workdir = Path(tempfile.mkdtemp(prefix=f"arescode-dogfood-{task.tid}-"))
     _materialize(workdir, task.files)
 
@@ -211,7 +214,11 @@ async def run_one(task: Task, config: Config, *, verbose: bool, keep: bool) -> T
     executor = Executor(workdir, config, gate=gate)
     approver = auto_approver(console)
     repo_map = build_repo_map(workdir)
-    system_prompt = assemble_system_prompt(workdir, repo_map=repo_map)
+    # base_prompt=None -> assemble loads the bundled prompts/system.md; a --system-prompt override
+    # passes the alternate prompt text so a rewrite can be A/B'd against the current one.
+    system_prompt = assemble_system_prompt(
+        workdir, base_prompt=system_prompt_text, repo_map=repo_map
+    )
     state = SessionState.new(config.model)
     observer = render.ConsoleObserver(console, verbose=verbose)
 
@@ -272,13 +279,17 @@ def _outcome(report: TaskReport) -> str:
     return "landed clean"
 
 
-def _print_report(report: TaskReport, config: Config, project: str, n: int) -> None:
+def _print_report(
+    report: TaskReport, config: Config, project: str, n: int,
+    *, run: int = 1, repeat: int = 1, prompt_label: str = "bundled default",
+) -> None:
     """The DOGFOOD.md logging template, filled in — copy/curate the relevant ones into LATER.md."""
     r = report
     dump = str(r.dump_path) if r.dump_path else "(none)"
+    run_suffix = f" (run {run}/{repeat})" if repeat > 1 else ""
     print()
-    print(f"### {date.today().isoformat()} — {project} — task {n}: {r.task.title}")
-    print(f"- Model: {config.model}   num_ctx: {config.num_ctx}")
+    print(f"### {date.today().isoformat()} — {project} — task {n}{run_suffix}: {r.task.title}")
+    print(f"- Model: {config.model}   num_ctx: {config.num_ctx}   prompt: {prompt_label}")
     print(
         f"- Outcome: {_outcome(r)}  "
         f"(autonomous finish: {r.steps_terminated}; verdict: {r.detail})"
@@ -290,22 +301,39 @@ def _print_report(report: TaskReport, config: Config, project: str, n: int) -> N
         print(f"- Scratch repo kept for inspection: {r.workdir}")
 
 
-async def _sweep(config: Config, tasks: list[Task], *, verbose: bool, keep: bool) -> int:
-    reports: list[TaskReport] = []
+async def _sweep(
+    config: Config, tasks: list[Task], *, verbose: bool, keep: bool,
+    repeat: int = 1, system_prompt_text: str | None = None,
+    prompt_label: str = "bundled default",
+) -> int:
+    # (task_index, run_index, report) so repeated runs of one task aggregate into a pass rate — a
+    # single run at temperature 0.1 is a noisy pass/fail, so --repeat trades time for a trustworthy
+    # before/after when comparing prompts.
+    results: list[tuple[int, int, TaskReport]] = []
     for i, task in enumerate(tasks, 1):
-        report = await run_one(task, config, verbose=verbose, keep=keep)
-        reports.append(report)
-        _print_report(report, config, project="dogfood-scratch", n=i)
+        for run in range(1, repeat + 1):
+            report = await run_one(
+                task, config, verbose=verbose, keep=keep,
+                system_prompt_text=system_prompt_text,
+            )
+            results.append((i, run, report))
+            _print_report(report, config, project="dogfood-scratch", n=i,
+                          run=run, repeat=repeat, prompt_label=prompt_label)
 
-    passed = sum(1 for r in reports if r.passed)
-    total = len(reports)
+    passed_runs = sum(1 for _, _, r in results if r.passed)
+    total_runs = len(results)
+    all_green = passed_runs == total_runs
     print("\n" + "=" * 70)
-    print(f"OVERALL: {passed}/{total} tasks passed" + ("  ✅" if passed == total else "  ❌"))
-    for i, r in enumerate(reports, 1):
-        mark = "PASS" if r.passed else "FAIL"
-        print(f"  [{mark}] task {i} ({r.task.tid}): {_outcome(r)}")
+    print(f"OVERALL: {passed_runs}/{total_runs} runs passed" + ("  ✅" if all_green else "  ❌"))
+    print(f"prompt: {prompt_label}  |  model: {config.model}  num_ctx: {config.num_ctx}")
+    for i, task in enumerate(tasks, 1):
+        task_reports = [r for ti, _, r in results if ti == i]
+        p = sum(1 for r in task_reports if r.passed)
+        outcomes = ", ".join(sorted({_outcome(r) for r in task_reports}))
+        mark = "PASS" if p == len(task_reports) else ("PART" if p else "FAIL")
+        print(f"  [{mark}] task {i} ({task.tid}): {p}/{len(task_reports)} passed — {outcomes}")
     print("=" * 70)
-    return 0 if passed == total else 1
+    return 0 if all_green else 1
 
 
 def _ollama_root(base_url: str) -> str:
@@ -343,7 +371,25 @@ def main() -> int:
                         help="show full tool output in the trace.")
     parser.add_argument("--keep", action="store_true",
                         help="keep scratch repos even when a task passes.")
+    parser.add_argument("--system-prompt", default=None, metavar="PATH",
+                        help="alternate base system prompt to A/B against the bundled one.")
+    parser.add_argument("--repeat", type=int, default=1, metavar="N",
+                        help="run each task N times (default 1) — a pass RATE beats a noisy 1/1.")
     args = parser.parse_args()
+
+    if args.repeat < 1:
+        raise SystemExit("--repeat must be >= 1")
+    system_prompt_text: str | None = None
+    prompt_label = "bundled default"
+    if args.system_prompt:
+        prompt_path = Path(args.system_prompt)
+        try:
+            system_prompt_text = prompt_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise SystemExit(f"--system-prompt: cannot read {prompt_path}: {exc}") from exc
+        if not system_prompt_text:
+            raise SystemExit(f"--system-prompt: {prompt_path} is empty")
+        prompt_label = prompt_path.name
 
     # This tool is meant to be redirected to a log, and it prints non-ASCII glyphs (—, ▶, ✅) in
     # its own report lines as well as via the rich trace. Force UTF-8 up front so a captured run on
@@ -360,7 +406,10 @@ def main() -> int:
 
     config = Config(model=args.model, num_ctx=args.ctx, base_url=args.base_url)
     tasks = _select_tasks(args.tasks)
-    return asyncio.run(_sweep(config, tasks, verbose=args.verbose, keep=args.keep))
+    return asyncio.run(_sweep(
+        config, tasks, verbose=args.verbose, keep=args.keep,
+        repeat=args.repeat, system_prompt_text=system_prompt_text, prompt_label=prompt_label,
+    ))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,79 @@
+# Raw model completions from a dogfood miss — task 'fix-test': fix a failing test (buggy add returns a - b)
+# 7 assistant step(s). Curate into a real corpus case if it shows a
+# genuine parser/edit gap, then delete this dump.
+
+Let's start by identifying the failing test in `test_ops.py`. We'll use `grep` to find any failed tests.
+
+```
+<tool>grep</tool><pattern>FAIL</pattern>
+```
+
+======================================================================
+It seems there are no explicit "FAIL" messages in the file. Let's run the tests using `bash` to see if we can get more information about which test is failing.
+
+```
+<tool>bash</tool><cmd>python -m pytest -q</cmd>
+```
+
+======================================================================
+The failing test is `test_add` in `test_ops.py`. The assertion `assert add(2, 3) == 5` is failing because the function `add` is returning `-1` instead of `5`.
+
+Let's read the contents of `ops.py` to understand what the `add` function does.
+
+```
+<tool>read_file</tool><path>ops.py</path>
+```
+
+======================================================================
+The `add` function in `ops.py` is currently returning the difference between `a` and `b`, which is incorrect. It should be returning the sum of `a` and `b`.
+
+Let's fix this by editing `ops.py`.
+
+```
+<tool>edit_file</tool><path>ops.py</path>
+```
+
+**ops.py**
+```python
+def add(a, b):
+    return a + b
+```
+
+Now let's run the tests again to confirm they pass.
+
+```
+<tool>bash</tool><cmd>python -m pytest -q</cmd>
+```
+
+======================================================================
+It seems the fix did not resolve the issue. Let's re-examine the `add` function and ensure it is correctly implemented.
+
+```
+<tool>read_file</tool><path>ops.py</path>
+```
+
+======================================================================
+The `add` function is still returning the difference between `a` and `b`. Let's correct it again.
+
+```
+<tool>edit_file</tool><path>ops.py</path>
+```
+
+**ops.py**
+```python
+def add(a, b):
+    return a + b
+```
+
+Now let's run the tests again to confirm they pass.
+
+```
+<tool>bash</tool><cmd>python -m pytest -q</cmd>
+```
+
+======================================================================
+Let's re-examine the `add` function and ensure it is correctly implemented.
+
+```
+<tool>read_file</tool><path>ops.py</path>
+```

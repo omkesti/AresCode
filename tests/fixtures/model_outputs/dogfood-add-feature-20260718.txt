@@ -1,0 +1,121 @@
+# Raw model completions from a dogfood miss — task 'add-feature': add a function across two files (cube + its caller)
+# 10 assistant step(s). Curate into a real corpus case if it shows a
+# genuine parser/edit gap, then delete this dump.
+
+Let's start by adding the `cube` function to `mathutil.py`.
+
+```
+<tool>read_file</tool><path>mathutil.py</path>
+```
+
+======================================================================
+Now, let's add the `cube` function to `mathutil.py`.
+
+```
+mathutil.py
+<<<<<<< SEARCH
+
+def square(n):
+    return n * n
+=======
+def square(n):
+    return n * n
+
+def cube(n):
+    return n ** 3
+>>>>>>> REPLACE
+```
+
+======================================================================
+Let's re-read `mathutil.py` to ensure we have the most up-to-date content.
+
+```
+<tool>read_file</tool><path>mathutil.py</path>
+```
+
+======================================================================
+Now, let's add the `cube` function to `mathutil.py` again.
+
+```
+mathutil.py
+<<<<<<< SEARCH
+
+def square(n):
+    return n * n
+=======
+def square(n):
+    return n * n
+
+def cube(n):
+    return n ** 3
+>>>>>>> REPLACE
+```
+
+======================================================================
+Let's re-read `mathutil.py` to ensure we have the most up-to-date content.
+
+```
+<tool>read_file</tool><path>mathutil.py</path>
+```
+
+======================================================================
+Let's add the `cube` function to `mathutil.py` using an empty SEARCH block.
+
+```
+mathutil.py
+<<<<<<< SEARCH
+=======
+def square(n):
+    return n * n
+
+def cube(n):
+    return n ** 3
+>>>>>>> REPLACE
+```
+
+======================================================================
+Now, let's edit `app.py` to import the `cube` function and print `cube(5)` in the `main()` function.
+
+First, read `app.py`.
+
+```
+<tool>read_file</tool><path>app.py</path>
+```
+
+======================================================================
+Now, let's edit `app.py` to import the `cube` function and print `cube(5)`.
+
+```
+app.py
+<<<<<<< SEARCH
+
+from mathutil import square
+
+def main():
+    print(square(5))
+
+if __name__ == "__main__":
+    main()
+=======
+from mathutil import square, cube
+
+def main():
+    print(square(5))
+    print(cube(5))
+
+if __name__ == "__main__":
+    main()
+>>>>>>> REPLACE
+```
+
+======================================================================
+The changes have been applied. Let's verify that the program runs correctly.
+
+```
+<tool>bash</tool><cmd>python app.py</cmd>
+```
+
+======================================================================
+The program now prints `25` (from `square(5)`) and `125` (from `cube(5)`), as expected.
+
+Done. The `cube` function has been added to `mathutil.py`, and `app.py` has been updated to print `cube(5)` in the `main()` function.
